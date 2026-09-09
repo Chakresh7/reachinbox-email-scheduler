@@ -1,7 +1,9 @@
+import type { Request } from "express";
 import { env, requireFeatureConfig } from "../../config/env";
 import { encrypt } from "../../lib/crypto";
 import { badRequest, dependencyUnavailable } from "../../lib/errors";
 import { prisma } from "../../lib/prisma";
+import { oauthCallbackUrl } from "../../lib/publicUrl";
 
 export interface SlackOAuthResult {
   slackTeamId: string;
@@ -24,18 +26,18 @@ interface SlackOAuthResponse {
   scope?: string;
 }
 
-export function slackAuthorizeUrl(state: string): string {
+export function slackAuthorizeUrl(req: Request, state: string): string {
   requireFeatureConfig("slack");
   const params = new URLSearchParams({
     client_id: env.SLACK_CLIENT_ID ?? "",
     scope: env.SLACK_SCOPES,
-    redirect_uri: env.SLACK_REDIRECT_URI ?? "",
+    redirect_uri: oauthCallbackUrl(req, "/api/slack/callback"),
     state,
   });
   return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
 }
 
-export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
+export async function exchangeSlackCode(req: Request, code: string): Promise<SlackOAuthResult> {
   requireFeatureConfig("slack");
   let response: Response;
   try {
@@ -46,7 +48,7 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
         client_id: env.SLACK_CLIENT_ID ?? "",
         client_secret: env.SLACK_CLIENT_SECRET ?? "",
         code,
-        redirect_uri: env.SLACK_REDIRECT_URI ?? "",
+        redirect_uri: oauthCallbackUrl(req, "/api/slack/callback"),
       }),
       signal: AbortSignal.timeout(15_000),
     });

@@ -22,8 +22,8 @@ export function features(_req: Request, res: Response): void {
   });
 }
 
-export function startGoogle(_req: Request, res: Response): void {
-  const started = startGoogleAuth();
+export function startGoogle(req: Request, res: Response): void {
+  const started = startGoogleAuth(req);
   setOAuthCookie(res, GOOGLE_STATE_COOKIE, started.state);
   setOAuthCookie(res, GOOGLE_VERIFIER_COOKIE, started.verifier);
   res.redirect(302, started.url);
@@ -49,7 +49,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
   requireMatchingState(cookieState, state);
   if (!verifier) throw badRequest("Missing PKCE verifier cookie");
 
-  const profile = await exchangeGoogleCode(code, verifier);
+  const profile = await exchangeGoogleCode(req, code, verifier);
   const user = await upsertGoogleUser(profile);
 
   setSessionCookie(res, user.id, user.tokenVersion);

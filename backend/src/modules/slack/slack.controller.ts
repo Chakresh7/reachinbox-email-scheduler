@@ -26,7 +26,7 @@ export async function install(req: Request, res: Response): Promise<void> {
   const nonce = randomToken();
   const state = signSlackOAuthState(user.id, nonce);
   setOAuthCookie(res, SLACK_STATE_COOKIE, state);
-  res.redirect(302, slackAuthorizeUrl(state));
+  res.redirect(302, slackAuthorizeUrl(req, state));
 }
 
 export async function callback(req: Request, res: Response): Promise<void> {
@@ -47,7 +47,7 @@ export async function callback(req: Request, res: Response): Promise<void> {
   const claims = verifySlackOAuthState(state ?? "");
   if (!claims) throw badRequest("Invalid Slack OAuth state");
 
-  const result = await exchangeSlackCode(code);
+  const result = await exchangeSlackCode(req, code);
   await upsertSlackIntegration(claims.userId, result);
   clearOAuthCookies(res);
   res.redirect(302, `${env.frontendOrigin}/dashboard?slack=connected`);

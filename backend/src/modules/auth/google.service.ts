@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
+import type { Request } from "express";
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
 import { env, requireFeatureConfig } from "../../config/env";
+import { randomToken } from "../../lib/crypto";
 import { badRequest } from "../../lib/errors";
 import { childLogger } from "../../lib/logger";
 import { prisma } from "../../lib/prisma";
-import { randomToken } from "../../lib/crypto";
+import { oauthCallbackUrl } from "../../lib/publicUrl";
 import { provisionEtherealSenders } from "./provisionSenders";
 
 const log = childLogger("auth:google");
@@ -22,19 +24,23 @@ export interface GoogleAuthStart {
   verifier: string;
 }
 
-function googleClient(): OAuth2Client {
+function googleClient(req: Request): OAuth2Client {
   requireFeatureConfig("google");
-  return new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.GOOGLE_REDIRECT_URI);
+  return new OAuth2Client(
+    env.GOOGLE_CLIENT_ID,
+    env.GOOGLE_CLIENT_SECRET,
+    oauthCallbackUrl(req, "/api/auth/google/callback"),
+  );
 }
 
 function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-export function startGoogleAuth(): GoogleAuthStart {
+export function startGoogleAuth(req: Request): GoogleAuthStart {
   const state = randomToken();
   const verifier = randomToken();
-  const client = googleClient();
+  const client = googleClient(req);
   const url = client.generateAuthUrl({
     access_type: "offline",
     prompt: "select_account",
@@ -46,8 +52,12 @@ export function startGoogleAuth(): GoogleAuthStart {
   return { url, state, verifier };
 }
 
-export async function exchangeGoogleCode(code: string, verifier: string): Promise<GoogleProfile> {
-  const client = googleClient();
+export async function exchangeGoogleCode(
+  req: Request,
+  code: string,
+  verifier: string,
+): Promise<GoogleProfile> {
+  const client = googleClient(req);
   const { tokens } = await client.getToken({ code, codeVerifier: verifier });
   if (!tokens.id_token) {
     throw badRequest("Google did not return an ID token");

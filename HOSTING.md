@@ -94,7 +94,8 @@ SLACK_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/api/slack/callback
 
 Manual deploy once more.
 
-Google Cloud Console → authorised **redirect URI** (exact match):
+Google Cloud Console → authorised **redirect URI** (exact match, extra row
+alongside localhost — the app now sends whatever host the reviewer opened):
 
 ```
 https://YOUR-SERVICE.onrender.com/api/auth/google/callback
