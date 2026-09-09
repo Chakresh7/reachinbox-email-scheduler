@@ -14,10 +14,17 @@ build/
 *.tsbuildinfo
 
 # ── Prisma
-# Migrations ARE committed. Generated client and local artifacts are not.
-backend/prisma/generated/
+# Migrations ARE committed. The generated client is TypeScript source emitted by
+# `prisma generate` (run in the build step), so it stays out of version control.
+backend/src/generated/
 backend/prisma/*.db
 backend/prisma/*.db-journal
+
+# Prisma 7 `init` drops agent-skill scaffolding we don't use
+skills-lock.json
+.claude/
+.windsurf/
+.agents/
 
 # ── Test / coverage
 coverage/

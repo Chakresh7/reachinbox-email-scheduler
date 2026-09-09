@@ -1,0 +1,245 @@
+// ReachInbox Email Job Scheduler — data model
+//
+// Postgres is the source of truth for *intent* (what should be sent, to whom,
+// when). Redis is the source of truth for *scheduling* (which job fires when).
+// Recovery always means reconciling Redis from this schema — see DESIGN.md §21.
+//
+// Connection URLs live in prisma7.config.ts (CLI) and src/lib/prisma.ts
+// (runtime adapter). Prisma 7 rejects `url`/`directUrl` in this block.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "cjs"
+  generatedFileExtension = "ts"
+  importFileExtension    = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CampaignStatus {
+  draft
+  expanding // fan-out job is creating email_jobs rows
+  scheduled // all rows created, delayed jobs enqueued
+  running // at least one email sent, not all terminal
+  completed
+  cancelled
+  failed
+}
+
+/// Lifecycle of a single email.
+///
+///   scheduled ──▶ claimed ──▶ sent
+///        ▲   ╲        ╲
+///        │    ╲        ╰──▶ failed ──▶ (retry) ──▶ scheduled
+///        │     ╰──▶ rate_limited ──▶ scheduled (next hour window)
+///        ╰── cancelled (terminal, from any pending state)
+///
+/// `claimed` is a distinct state rather than a boolean lock so that the
+/// idempotency gate is a single conditional UPDATE, and so a row orphaned by a
+/// hard kill is identifiable by `claimed_at` age. See DESIGN.md §8.
+enum EmailJobStatus {
+  scheduled
+  rate_limited
+  claimed
+  sent
+  failed
+  cancelled
+  needs_review // claimed, but SMTP outcome is unknown after a crash
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  googleSub String   @unique @map("google_sub")
+  email     String   @unique @db.Citext
+  name      String
+  avatarUrl String?  @map("avatar_url")
+  /// Bumping this invalidates every issued session JWT for this user.
+  tokenVersion Int   @default(0) @map("token_version")
+  isAdmin   Boolean  @default(false) @map("is_admin")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  senders          Sender[]
+  campaigns        Campaign[]
+  emailJobs        EmailJob[]
+  slackIntegration SlackIntegration?
+  rateLimitEvents  RateLimitEvent[]
+
+  @@map("users")
+}
+
+/// An SMTP identity emails are sent from. Multiple senders per user is a hard
+/// requirement, and is what makes the per-sender rate limit meaningful.
+model Sender {
+  id          String @id @default(uuid()) @db.Uuid
+  userId      String @map("user_id") @db.Uuid
+  email       String @db.Citext
+  displayName String @map("display_name")
+
+  smtpHost         String @map("smtp_host")
+  smtpPort         Int    @map("smtp_port")
+  smtpUser         String @map("smtp_user")
+  /// AES-256-GCM ciphertext. Never logged, never returned by the API.
+  smtpPassEncrypted String @map("smtp_pass_encrypted")
+
+  /// Per-sender override. NULL falls back to MAX_EMAILS_PER_HOUR_PER_SENDER.
+  maxEmailsPerHour Int?     @map("max_emails_per_hour")
+  isActive         Boolean  @default(true) @map("is_active")
+  lastVerifiedAt   DateTime? @map("last_verified_at") @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailJobs EmailJob[]
+
+  @@unique([userId, email])
+  @@index([userId, isActive])
+  @@map("senders")
+}
+
+model Campaign {
+  id      String @id @default(uuid()) @db.Uuid
+  userId  String @map("user_id") @db.Uuid
+  subject String
+  body    String @db.Text
+
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  /// Requested gap between sends. Clamped at runtime to at least
+  /// MIN_DELAY_BETWEEN_EMAILS_MS so a client cannot ask for 0.
+  delayBetweenMs Int  @map("delay_between_ms")
+  /// Per-campaign hourly cap. Effective limit is min(this, sender limit).
+  hourlyLimit    Int? @map("hourly_limit")
+
+  totalRecipients Int            @default(0) @map("total_recipients")
+  status          CampaignStatus @default(draft)
+
+  /// Supports safe client retries of POST /api/campaigns.
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailJobs EmailJob[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("campaigns")
+}
+
+/// One row per recipient per campaign. This is "an email" everywhere in the UI.
+model EmailJob {
+  id         String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  /// Denormalised from the campaign so dashboard list queries never join.
+  userId     String @map("user_id") @db.Uuid
+  senderId   String @map("sender_id") @db.Uuid
+
+  recipientEmail String  @map("recipient_email") @db.Citext
+  recipientName  String? @map("recipient_name")
+
+  /// 0-based position within the campaign. Drives pacing and FIFO ordering.
+  sequenceIndex Int @map("sequence_index")
+
+  /// Current intended send time; rewritten on every rate-limit reschedule.
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(3)
+  /// Immutable original target, so the UI can show "deferred by rate limit".
+  originalScheduledAt DateTime @map("original_scheduled_at") @db.Timestamptz(3)
+
+  status EmailJobStatus @default(scheduled)
+
+  attemptCount    Int @default(0) @map("attempt_count")
+  rescheduleCount Int @default(0) @map("reschedule_count")
+
+  lastError         String?   @map("last_error") @db.Text
+  providerMessageId String?   @map("provider_message_id")
+  /// Ethereal preview link, surfaced in the Sent table.
+  previewUrl        String?   @map("preview_url")
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(3)
+  /// Set when a worker wins the claim; age detects rows orphaned by a crash.
+  claimedAt         DateTime? @map("claimed_at") @db.Timestamptz(3)
+
+  /// sha256(campaignId + ':' + lower(recipientEmail)). The database-level
+  /// guarantee that one recipient is never queued twice for one campaign.
+  dedupeKey String @unique @map("dedupe_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sender   Sender   @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  // Scheduled tab
+  @@index([userId, status, scheduledAt])
+  // Sent tab
+  @@index([userId, status, sentAt(sort: Desc)])
+  // Startup reconciler scan (DESIGN.md §21)
+  @@index([status, scheduledAt])
+  @@index([campaignId, sequenceIndex])
+  @@index([senderId, sentAt(sort: Desc)])
+  @@map("email_jobs")
+}
+
+/// One Slack workspace connection per user, via OAuth v2 `incoming-webhook`.
+/// Soft-revoked rather than deleted so reconnects stay auditable.
+model SlackIntegration {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+
+  slackTeamId   String  @map("slack_team_id")
+  slackTeamName String  @map("slack_team_name")
+  channelId     String? @map("channel_id")
+  channelName   String? @map("channel_name")
+
+  /// AES-256-GCM ciphertext of the incoming-webhook URL.
+  webhookUrlEncrypted String @map("webhook_url_encrypted")
+  scope               String
+
+  connectedAt DateTime  @default(now()) @map("connected_at") @db.Timestamptz(3)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastError   String?   @map("last_error") @db.Text
+  lastNotifiedAt DateTime? @map("last_notified_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("slack_integrations")
+}
+
+/// Audit trail for hourly-limit hits, and the durable half of "notify Slack at
+/// most once per sender per hour". Redis SETNX is the fast path; this is truth.
+model RateLimitEvent {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  senderId String @map("sender_id") @db.Uuid
+
+  /// Start of the UTC hour window that was exhausted.
+  hourWindow DateTime @map("hour_window") @db.Timestamptz(3)
+  limitValue Int      @map("limit_value")
+  /// Incremented as further jobs are pushed out of this window.
+  jobsDeferred Int    @default(0) @map("jobs_deferred")
+
+  notifiedAt  DateTime? @map("notified_at") @db.Timestamptz(3)
+  notifyError String?   @map("notify_error") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, hourWindow])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("rate_limit_events")
+}

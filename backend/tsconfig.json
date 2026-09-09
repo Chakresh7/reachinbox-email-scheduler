@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    /* Output: CommonJS keeps relative imports extension-free, which removes a
+       constant tax on a codebase this size. Node 20+ runs it natively. */
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    /* TypeScript 7 removed the legacy `node10` resolver, and requires `module`
+       and `moduleResolution` to agree. `node16` still emits CommonJS here
+       because package.json has no `"type": "module"`, and it honours package
+       `exports` maps (nodemailer 10 needs that). Relative imports stay
+       extension-free because every file resolves in CommonJS mode. */
+    "module": "node16",
+    "moduleResolution": "node16",
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": false,
+
+    /* Strictness: every flag on. The scheduler's correctness argument rests on
+       exhaustive status handling and never silently accepting undefined. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": false,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* Interop */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    /* No path aliases on purpose: `node dist/server.js` would not resolve them
+       without an extra rewrite step, so relative imports are used throughout. */
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
