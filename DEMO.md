@@ -4,6 +4,8 @@ You record this. Do not commit the video file.
 
 Use **Google login**, not the `DEV_USER_ID` fallback. Keep `backend/.env` off screen.
 
+Hosted login (same app, ClickUp URL): [https://reachinbox-7vtq.onrender.com](https://reachinbox-7vtq.onrender.com). First hit after idle can take about a minute. Worker restart is still easier on `localhost`.
+
 ## Prep (before you hit record)
 
 1. `npm run dev` — API `:4000`, worker, frontend `:5173`.
