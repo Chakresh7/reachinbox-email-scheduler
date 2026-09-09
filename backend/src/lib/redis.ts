@@ -86,23 +86,40 @@ export async function pingRedis(): Promise<number> {
 }
 
 /**
- * Reads `maxmemory-policy`. Returns null when the provider blocks CONFIG GET,
- * which some managed tiers do — that is a "cannot verify", not a failure.
+ * Reads the effective `maxmemory-policy`.
+ *
+ * Two sources, because the important one is often unavailable: managed
+ * providers (Redis Cloud, Upstash) disable `CONFIG GET` entirely, returning an
+ * empty reply rather than an error. `INFO memory` is not restricted and reports
+ * the same value as `maxmemory_policy`, so it is used as a fallback.
+ *
+ * This fallback is the difference between actually enforcing the eviction
+ * policy and merely logging "unknown" on exactly the hosting where a wrong
+ * policy is most likely.
  */
 export async function getMaxmemoryPolicy(): Promise<string | null> {
   try {
     const result = (await redis.config("GET", "maxmemory-policy")) as unknown;
-    // Reply is a flat [name, value] array, or an object on RESP3.
-    if (Array.isArray(result)) {
-      return typeof result[1] === "string" ? result[1] : null;
+    // Flat [name, value] array on RESP2, an object on RESP3.
+    if (Array.isArray(result) && typeof result[1] === "string") {
+      return result[1];
     }
-    if (result && typeof result === "object") {
+    if (result && !Array.isArray(result) && typeof result === "object") {
       const value = (result as Record<string, unknown>)["maxmemory-policy"];
-      return typeof value === "string" ? value : null;
+      if (typeof value === "string") return value;
     }
-    return null;
+    log.debug("CONFIG GET returned no value; falling back to INFO memory");
   } catch (err) {
-    log.debug({ err }, "CONFIG GET maxmemory-policy is not permitted on this Redis");
+    log.debug({ err }, "CONFIG GET is not permitted on this Redis; falling back to INFO memory");
+  }
+
+  try {
+    const info = await redis.info("memory");
+    // `maxmemory_policy:noeviction` — underscore here, hyphen in CONFIG.
+    const match = /^maxmemory_policy:(.+)$/m.exec(info);
+    return match?.[1]?.trim() ?? null;
+  } catch (err) {
+    log.debug({ err }, "INFO memory is not permitted on this Redis");
     return null;
   }
 }
@@ -139,9 +156,14 @@ export async function assertRedisReady(): Promise<RedisReadiness> {
   } else if (maxmemoryPolicy !== "noeviction") {
     const message =
       `Redis maxmemory-policy is "${maxmemoryPolicy}", but this service requires "noeviction". ` +
-      "Any allkeys-* policy lets Redis evict BullMQ delayed-set entries, which silently " +
-      "destroys scheduled emails. Fix the policy, or set REDIS_ASSERT_NOEVICTION=false to " +
-      "override deliberately.";
+      "Under an allkeys-* policy Redis may evict a BullMQ delayed-set entry, silently " +
+      "destroying a scheduled email. Under a volatile-* policy it may evict any key that has " +
+      "a TTL, which here means job locks (causing a job to look stalled and be processed " +
+      "twice) and the hourly rate-limit counters (resetting them mid-window, so more email " +
+      "goes out than the configured limit allows). Both failures are invisible: no error is " +
+      "raised anywhere. On a managed provider this is a setting in the database's console " +
+      "(Redis Cloud: Databases > Configuration > Data eviction policy). Set " +
+      "REDIS_ASSERT_NOEVICTION=false only to override deliberately.";
 
     if (env.REDIS_ASSERT_NOEVICTION) {
       log.fatal({ maxmemoryPolicy }, message);

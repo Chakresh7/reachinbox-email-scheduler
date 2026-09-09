@@ -22,7 +22,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:status": "prisma migrate status",
     "prisma:studio": "prisma studio",
-    "check:deps": "tsx src/scripts/checkDependencies.ts"
+    "check:deps": "tsx src/scripts/checkDependencies.ts",
+    "check:schema": "tsx src/scripts/verifySchema.ts"
   },
   "dependencies": {
     "@bull-board/api": "9.9.0",
