@@ -1,7 +1,4 @@
-# Render Blueprint — public dashboard + API + worker.
-# The WEB service is the URL you paste on the ClickUp form.
-# Connect this repo in Render → New → Blueprint.
-# Create env group "reachinbox" with Neon/Redis/ES/OAuth secrets (never commit them).
+# Blueprint needs the Render GitHub App. Hosted deploy uses GHCR instead — HOSTING.md.
 
 previewsEnabled: false
 

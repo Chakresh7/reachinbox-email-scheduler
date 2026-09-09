@@ -18,10 +18,12 @@ COPY prisma ./prisma
 COPY prisma7.config.ts tsconfig.json tsconfig.build.json ./
 COPY src ./src
 
-RUN npx prisma generate && npx tsc -p tsconfig.build.json
+# `npm run build` also copies the Lua rate-limit scripts tsc does not emit.
+RUN npm run build
 
-# Drop dev dependencies from the tree we are about to copy forward.
-RUN npm prune --omit=dev
+# Drop dev dependencies, then put the Prisma CLI back — `migrate deploy` at
+# container start is a production boot step, not a local-dev convenience.
+RUN npm prune --omit=dev && npm install prisma@7.10.0 --omit=dev --no-audit --no-fund --foreground-scripts
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runtime

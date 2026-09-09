@@ -7,79 +7,118 @@ a second codebase.
 |---|---|
 | Assignment Github repository | `https://github.com/Chakresh7/reachinbox-email-scheduler` |
 | Assignment Demo Video | Loom or Drive link after you record ([DEMO.md](./DEMO.md)) |
-| Hosted Link of the project you have built | The **public dashboard URL** from Render (below), e.g. `https://reachinbox-web.onrender.com` |
+| Hosted Link of the project you have built | The **public Render URL** of the web service (below) |
 | Hosted Assignment | **The same URL** as Hosted Link |
 
 Do not paste `localhost`. Reviewers must open the site without cloning.
 
 This app is **API + worker + SPA**. The session cookie only works if the
-browser talks to **one HTTPS origin** that proxies `/api` (same as Vite in
-dev). Render is set up that way: the **web** service is the public URL.
+browser talks to **one HTTPS origin**. The hosted image serves the Vite build
+from the API process **and** runs the worker in the same container (Render’s
+free tier has no background-worker service).
 
 You already have Neon, Redis Cloud, and Elastic Cloud. Reuse those. Do not
 put `backend/.env` in Git.
 
-## 1. Create a Render account
+## Why Render this way
 
-1. Sign up at [https://render.com](https://render.com) with GitHub.
-2. New → **Blueprint** → this repository → `render.yaml`.
-3. Fill the env group `reachinbox` (dashboard → Environment Groups) **before**
-   the first deploy finishes, using the same secrets as local `backend/.env`
-   except the URLs below.
+Render’s GitHub App is what failed earlier. This path never uses it.
 
-## 2. Public URL and OAuth
+GitHub Actions (already logged in as Chakresh7) **builds the Docker image**
+and pushes it to GHCR. Render only **pulls that image**.
 
-After the **web** service is live, copy its URL. Call it `https://YOUR-WEB.onrender.com`.
+Railway is unused: that account’s trial expired.
 
-Set these on the **api** service (and keep web `API_UPSTREAM` pointing at the
-api’s **internal** host `http://reachinbox-api:4000`):
+## 1. Push the image-build workflow
+
+Commit and push `.github/workflows/hosted-image.yml` to `main`. That starts
+the build at:
+
+https://github.com/Chakresh7/reachinbox-email-scheduler/actions
+
+Wait until **hosted-image** is green. The image is:
+
+```
+ghcr.io/chakresh7/reachinbox-email-scheduler:latest
+```
+
+## 2. Let Render pull the private image
+
+Repo is private, so the package is private. Create a GitHub token with
+**read:packages** (and SSO if asked):
+
+https://github.com/settings/tokens → Generate new token (classic) →
+`read:packages` only.
+
+Render dashboard → **Account Settings → Registry Credentials → Add** →
+GitHub, username `Chakresh7`, password = that token.
+
+## 3. Create one Free web service
+
+1. [https://dashboard.render.com](https://dashboard.render.com) → **New → Web Service**
+2. **Existing Image** (not GitHub)
+3. Image URL:
+
+   ```
+   ghcr.io/chakresh7/reachinbox-email-scheduler:latest
+   ```
+
+4. Instance type: **Free**
+5. Health check path: `/healthz`
+6. Env vars from local `backend/.env`, with these overrides:
 
 ```
 NODE_ENV=production
-FRONTEND_URL=https://YOUR-WEB.onrender.com
-API_PUBLIC_URL=https://YOUR-WEB.onrender.com
-GOOGLE_REDIRECT_URI=https://YOUR-WEB.onrender.com/api/auth/google/callback
-SLACK_REDIRECT_URI=https://YOUR-WEB.onrender.com/api/slack/callback
+LOG_LEVEL=info
+REDIS_ASSERT_NOEVICTION=false
+FRONTEND_DIST=/app/public
 ```
 
-Google Cloud Console → OAuth client → authorised **redirect URI** (exact match):
+Do **not** set `DEV_USER_ID`. Do **not** force `PORT` — Render injects it.
+
+Leave `FRONTEND_URL`, `API_PUBLIC_URL`, and OAuth redirect URIs blank until
+the `onrender.com` URL exists, then set them (next step) and redeploy.
+
+## 4. Public URL and OAuth
+
+Copy the service URL. Call it `https://YOUR-SERVICE.onrender.com`.
+
+Set:
 
 ```
-https://YOUR-WEB.onrender.com/api/auth/google/callback
+FRONTEND_URL=https://YOUR-SERVICE.onrender.com
+API_PUBLIC_URL=https://YOUR-SERVICE.onrender.com
+GOOGLE_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/api/auth/google/callback
+SLACK_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/api/slack/callback
+```
+
+Manual deploy once more.
+
+Google Cloud Console → authorised **redirect URI** (exact match):
+
+```
+https://YOUR-SERVICE.onrender.com/api/auth/google/callback
 ```
 
 Authorised JavaScript origin:
 
 ```
-https://YOUR-WEB.onrender.com
+https://YOUR-SERVICE.onrender.com
 ```
 
 Slack app → redirect URL:
 
 ```
-https://YOUR-WEB.onrender.com/api/slack/callback
+https://YOUR-SERVICE.onrender.com/api/slack/callback
 ```
 
-Leave the localhost URIs in place as extra rows so local `npm run dev` still
-works.
+Keep the localhost URIs as extra rows so local `npm run dev` still works.
 
-If Redis Cloud blocks `CONFIG GET`, set `REDIS_ASSERT_NOEVICTION=false` (you
-already verified `noeviction` locally).
+## 5. Check it
 
-## 3. Redeploy
-
-Trigger a manual deploy of **api**, then **worker**, then **web**. Open:
-
-```
-https://YOUR-WEB.onrender.com
-```
-
-Sign in with Google (production ignores `DEV_USER_ID`). Compose a two-line CSV.
-If the first request is slow, Render’s free web may be waking up.
+Open the Render URL. The first hit after idle can take a minute (Free instances
+sleep). Sign in with Google. Compose a two-line CSV.
 
 Paste that URL into **both** hosted fields on the ClickUp form.
 
-## 4. What you still record locally
-
-The demo video (restart worker, Slack) is easier on `localhost`. Hosted is for
-reviewers clicking the form link.
+The demo video (restart worker, Slack) is still easier on `localhost`.

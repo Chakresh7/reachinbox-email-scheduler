@@ -2,6 +2,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
+import { serveSpa } from "./bootstrap/serveSpa";
 import { env } from "./config/env";
 import { forbidden } from "./lib/errors";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -87,6 +88,10 @@ export function createApp(): Express {
   app.use("/admin/queues", (req, res, next) => {
     void protectQueueBoard(req, res, next);
   }, createQueueBoardRouter());
+
+  // After API routes, before the JSON 404: hosted deploys serve the Vite build
+  // from this process so the cookie stays first-party. Local dev skips this.
+  serveSpa(app);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

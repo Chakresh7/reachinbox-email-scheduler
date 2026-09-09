@@ -43,6 +43,16 @@ const envSchema = z.object({
   /** Comma-separated list of browser origins allowed to send credentialed requests. */
   FRONTEND_URL: nonEmpty("FRONTEND_URL").default("http://localhost:5173"),
   API_PUBLIC_URL: nonEmpty("API_PUBLIC_URL").default("http://localhost:4000"),
+  /**
+   * Directory of the Vite production build. When set, Express serves the SPA
+   * from this process so the dashboard and `/api` share one HTTPS origin.
+   * Local `npm run dev` leaves this empty and uses the Vite proxy instead.
+   */
+  FRONTEND_DIST: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined)),
 
   // ── Datastores (required) ─────────────────────────────────────────────────
   /** Pooled connection, used at runtime by the Prisma driver adapter. */

@@ -63,14 +63,18 @@ async function main(): Promise<void> {
   await verifyDependencies();
   logFeatureSummary();
 
-  const server: Server = app.listen(env.PORT, () => {
+  // Production PaaS networks (Railway private DNS, Fly 6PN) speak IPv6.
+  // `::` dual-stacks on Linux; binding only `0.0.0.0` drops those probes.
+  const listenHost = env.isProd ? "::" : "0.0.0.0";
+  const server: Server = app.listen(env.PORT, listenHost, () => {
     log.info(
       {
         port: env.PORT,
+        host: listenHost,
         env: env.NODE_ENV,
         allowedOrigins: env.allowedOrigins,
       },
-      `API listening on http://localhost:${env.PORT}`,
+      `API listening on http://${listenHost}:${env.PORT}`,
     );
   });
 
