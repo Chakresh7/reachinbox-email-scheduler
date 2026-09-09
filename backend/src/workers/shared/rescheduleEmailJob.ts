@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 import { decrypt } from "../../lib/crypto";
 import { childLogger } from "../../lib/logger";
 import { prisma } from "../../lib/prisma";
+import { enqueueSearchIndex } from "../../queues/searchIndex.queue";
 import {
   hourEpoch,
   jitterMs,
@@ -138,6 +139,9 @@ export async function rescheduleToNextWindow(input: {
       rescheduleCount: { increment: 1 },
       claimedAt: null,
     },
+  });
+  await enqueueSearchIndex(input.emailJobId).catch((err: unknown) => {
+    log.error({ err, emailJobId: input.emailJobId }, "search-index enqueue after rate-limit failed");
   });
 
   if (input.reason === "SENDER_HOURLY_LIMIT") {

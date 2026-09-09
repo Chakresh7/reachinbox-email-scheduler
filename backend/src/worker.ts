@@ -1,14 +1,16 @@
 import { closeAllTransporters } from "./mailer/transporterPool";
+import { ensureIndices } from "./bootstrap/ensureIndices";
 import { reconcileEmailJobs } from "./bootstrap/reconcile";
 import { installShutdownHandlers, onShutdown } from "./bootstrap/shutdown";
 import { env } from "./config/env";
-import { disconnectElasticsearch } from "./lib/elasticsearch";
+import { disconnectElasticsearch, isSearchConfigured } from "./lib/elasticsearch";
 import { childLogger } from "./lib/logger";
 import { disconnectPrisma, pingPostgres } from "./lib/prisma";
 import { assertRedisReady, disconnectRedis } from "./lib/redis";
 import { closeProducerQueues } from "./queues";
 import { startCampaignExpandWorker } from "./workers/campaignExpand.worker";
 import { startEmailSendWorker } from "./workers/emailSend.worker";
+import { startSearchIndexWorker } from "./workers/searchIndex.worker";
 
 const log = childLogger("worker");
 
@@ -19,18 +21,28 @@ async function main(): Promise<void> {
   log.info({ latencyMs: Math.round(postgresLatency * 100) / 100 }, "postgres ready");
   await assertRedisReady();
 
+  if (isSearchConfigured) {
+    try {
+      await ensureIndices();
+    } catch (err) {
+      log.warn({ err }, "elasticsearch mapping failed at boot; search will fall back to Postgres");
+    }
+  }
+
   if (env.RECONCILE_ON_BOOT) {
     await reconcileEmailJobs();
   }
 
   const expandWorker = startCampaignExpandWorker();
   const sendWorker = startEmailSendWorker();
+  const searchWorker = isSearchConfigured ? startSearchIndexWorker() : null;
 
   log.info(
     {
       concurrency: env.WORKER_CONCURRENCY,
       minDelayMs: env.MIN_DELAY_BETWEEN_EMAILS_MS,
       expandBatchSize: env.EXPAND_BATCH_SIZE,
+      searchIndex: Boolean(searchWorker),
     },
     "workers registered",
   );
@@ -45,6 +57,13 @@ async function main(): Promise<void> {
     timeoutMs: 20_000,
     handler: () => expandWorker.close(),
   });
+  if (searchWorker) {
+    onShutdown({
+      name: "search-index-worker",
+      timeoutMs: 20_000,
+      handler: () => searchWorker.close(),
+    });
+  }
   onShutdown({ name: "smtp-pool", handler: closeAllTransporters });
   onShutdown({ name: "queues", handler: closeProducerQueues });
   onShutdown({ name: "prisma", handler: disconnectPrisma });

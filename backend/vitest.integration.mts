@@ -22,7 +22,6 @@ export default defineConfig({
     env: {
       NODE_ENV: "test",
       LOG_LEVEL: "silent",
-      SEARCH_ENABLED: "false",
     },
   },
 });

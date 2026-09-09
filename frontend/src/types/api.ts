@@ -127,3 +127,25 @@ export interface SlackStatus {
   channelName: string | null;
   connectedAt: string | null;
 }
+
+export interface SearchHit {
+  id: string;
+  campaignId: string;
+  recipientEmail: string;
+  subject: string;
+  status: EmailStatus;
+  scheduledAt: string;
+  sentAt: string | null;
+  senderEmail: string;
+  rescheduleCount: number;
+}
+
+export interface SearchMeta extends PageMeta {
+  took: number;
+  degraded: boolean;
+}
+
+export interface SearchResponse {
+  data: SearchHit[];
+  meta: SearchMeta;
+}

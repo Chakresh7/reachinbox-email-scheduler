@@ -11,11 +11,13 @@ import { env } from "./env";
 export const QueueName = {
   campaignExpand: "campaign-expand",
   emailSend: "email-send",
+  searchIndex: "search-index",
 } as const;
 
 export const JobName = {
   expandBatch: "expand-batch",
   sendEmail: "send-email",
+  indexEmail: "index-email",
 } as const;
 
 export function emailSendJobId(emailJobId: string): string {
@@ -28,6 +30,14 @@ export function emailSendJobId(emailJobId: string): string {
 
 export function campaignExpandJobId(campaignId: string, batchIndex: number): string {
   return `expand:${campaignId}:${batchIndex}`;
+}
+
+export function searchIndexJobId(emailJobId: string): string {
+  return `index:${emailJobId}:doc`;
+}
+
+export function searchIndexBulkJobId(campaignId: string, batchIndex: number): string {
+  return `bulk:${campaignId}:${batchIndex}`;
 }
 
 export function idempotencyRedisKey(hash: string): string {

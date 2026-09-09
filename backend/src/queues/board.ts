@@ -8,6 +8,7 @@ import { safeEqual } from "../lib/crypto";
 import { isAdminUser, requireIdentity, requireUser } from "../middleware/requireAuth";
 import { campaignExpandQueue } from "./campaignExpand.queue";
 import { emailSendQueue } from "./emailSend.queue";
+import { searchIndexQueue } from "./searchIndex.queue";
 
 function unauthorizedBasic(res: Response): void {
   res.setHeader("WWW-Authenticate", 'Basic realm="ReachInbox queues"');
@@ -67,7 +68,11 @@ export function createQueueBoardRouter() {
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath("/admin/queues");
   createBullBoard({
-    queues: [new BullMQAdapter(emailSendQueue), new BullMQAdapter(campaignExpandQueue)],
+    queues: [
+      new BullMQAdapter(emailSendQueue),
+      new BullMQAdapter(campaignExpandQueue),
+      new BullMQAdapter(searchIndexQueue),
+    ],
     serverAdapter,
   });
   return serverAdapter.getRouter();

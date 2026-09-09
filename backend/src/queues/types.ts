@@ -6,3 +6,7 @@ export interface CampaignExpandJobData {
 export interface EmailSendJobData {
   emailJobId: string;
 }
+
+export type SearchIndexJobData =
+  | { emailJobId: string }
+  | { emailJobIds: string[]; campaignId: string; batchIndex: number };

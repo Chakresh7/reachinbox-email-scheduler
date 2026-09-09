@@ -4,12 +4,14 @@ import request from "supertest";
 import { reconcileEmailJobs } from "../../src/bootstrap/reconcile";
 import { app } from "../../src/app";
 import { env } from "../../src/config/env";
-import { emailSendJobId } from "../../src/config/constants";
+import { emailSendJobId, paceSenderKey, rlSenderKey } from "../../src/config/constants";
 import { prisma, disconnectPrisma } from "../../src/lib/prisma";
-import { disconnectRedis } from "../../src/lib/redis";
+import { disconnectRedis, redis } from "../../src/lib/redis";
+import { hourEpoch } from "../../src/ratelimit";
 import { setMailSenderForTests } from "../../src/mailer/types";
 import { campaignExpandQueue } from "../../src/queues/campaignExpand.queue";
 import { emailSendQueue } from "../../src/queues/emailSend.queue";
+import { searchIndexQueue } from "../../src/queues/searchIndex.queue";
 import { releaseSlot, reserveSlot } from "../../src/ratelimit";
 import { startCampaignExpandWorker } from "../../src/workers/campaignExpand.worker";
 import { startEmailSendWorker } from "../../src/workers/emailSend.worker";
@@ -18,7 +20,7 @@ import type { Worker } from "bullmq";
 const run = Boolean(process.env.RUN_INTEGRATION) && Boolean(env.DEV_USER_ID);
 
 describe.skipIf(!run)("rate limiter (live Redis)", () => {
-  const futureNow = Date.parse("2099-01-01T00:00:00.000Z");
+  const futureNow = (Math.floor(Math.random() * 40_000) + 8_000) * 3_600_000;
   const senderId = randomUUID();
 
   it("grants exactly 200 of 500 concurrent reservations", async () => {
@@ -153,15 +155,27 @@ describe.skipIf(!run)("email-send respects per-sender hourly limit", () => {
     const expandDeadline = Date.now() + 20_000;
     while (Date.now() < expandDeadline) {
       const n = await prisma.emailJob.count({ where: { campaignId } });
-      if (n === 5) break;
+      const campaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true },
+      });
+      if (n === 5 && campaign?.status === "scheduled") break;
       await new Promise((r) => setTimeout(r, 200));
     }
     expect(await prisma.emailJob.count({ where: { campaignId } })).toBe(5);
+    const expanded = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    expect(expanded?.status).toBe("scheduled");
+    const rows = await prisma.emailJob.findMany({ where: { campaignId }, select: { id: true } });
+    for (const row of rows) {
+      expect(await emailSendQueue.getJob(emailSendJobId(row.id))).toBeTruthy();
+    }
 
     await prisma.sender.update({
       where: { id: senderId! },
       data: { maxEmailsPerHour: 2 },
     });
+    const epoch = hourEpoch(Date.now(), env.RATE_LIMIT_WINDOW_MS);
+    await redis.del(rlSenderKey(senderId!, epoch), paceSenderKey(senderId!));
 
     send = startEmailSendWorker();
     await send.waitUntilReady();
@@ -249,6 +263,7 @@ afterAll(async () => {
   await Promise.allSettled([
     emailSendQueue.close(),
     campaignExpandQueue.close(),
+    searchIndexQueue.close(),
     disconnectPrisma(),
     disconnectRedis(),
   ]);

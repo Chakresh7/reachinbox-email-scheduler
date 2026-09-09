@@ -6,6 +6,7 @@ import { prisma } from "../lib/prisma";
 import { createWorkerConnection } from "../lib/redis";
 import { enqueueCampaignExpand } from "../queues/campaignExpand.queue";
 import { enqueueEmailSendBulk } from "../queues/emailSend.queue";
+import { enqueueSearchIndexBulk } from "../queues/searchIndex.queue";
 import type { CampaignExpandJobData } from "../queues/types";
 import { parseRecipientsJson } from "../modules/campaigns/campaigns.service";
 import { newId, recipientDedupeKey } from "../modules/campaigns/ids";
@@ -127,6 +128,15 @@ async function expandBatch(data: CampaignExpandJobData): Promise<{ created: numb
       delayMs: row.scheduledAt.getTime() - now,
     })),
   );
+  try {
+    await enqueueSearchIndexBulk(
+      persisted.map((row) => row.id),
+      campaign.id,
+      data.batchIndex,
+    );
+  } catch (err) {
+    log.error({ err, campaignId: campaign.id }, "search-index enqueue failed; send path continues");
+  }
 
   const expandedCount = Math.min(start + slice.length, recipients.length);
   const done = expandedCount >= recipients.length;

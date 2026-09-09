@@ -7,10 +7,10 @@ Redis-backed per-sender and global hourly rate limits, survives restarts without
 losing or duplicating a single email, and makes everything searchable through
 Elasticsearch.
 
-> **Status: Phase 1 of 6 complete.** Campaigns can be scheduled from a CSV,
-> expanded with BullMQ delayed jobs, and sent through live Ethereal SMTP.
-> Redis hourly limiter, Google OAuth, Elasticsearch indexing and Compose UI
-> remain later phases. See [Implementation status](#implementation-status).
+> **Status: Phase 3 of 6 complete.** Campaigns schedule, send through Ethereal,
+> respect Redis Lua rate limits, and are searchable via Elasticsearch (with a
+> Postgres fallback). Google OAuth, Slack, and the Compose UI remain later
+> phases. See [Implementation status](#implementation-status).
 >
 > The complete pre-implementation architecture, including every design decision
 > and its rejected alternatives, is in **[DESIGN.md](./DESIGN.md)**.
@@ -30,6 +30,7 @@ Elasticsearch.
 - [How scheduling works](#how-scheduling-works)
 - [How persistence on restart is handled](#how-persistence-on-restart-is-handled)
 - [How rate limiting and concurrency are implemented](#how-rate-limiting-and-concurrency-are-implemented)
+- [How search works](#how-search-works)
 - [Testing](#testing)
 - [Implementation status](#implementation-status)
 - [Assumptions, shortcuts and trade-offs](#assumptions-shortcuts-and-trade-offs)
@@ -483,6 +484,30 @@ receives two bulk requests rather than a thousand.
 
 ---
 
+## How search works
+
+*Implemented in Phase 3. Full detail in [DESIGN.md §12](./DESIGN.md).*
+
+Scheduled and sent emails are searchable through Elasticsearch. The sending path
+never talks to ES: the expander enqueues one `search-index` **bulk** job per 500
+rows, and the send worker enqueues a **single** index job on `sent`, `failed`,
+and `rate_limited`. Documents use `_id = email_jobs.id`, so retries overwrite.
+
+The index is `emails_v1` behind alias `emails`. If `emails` already exists as a
+concrete index (common on Elastic Cloud), we write to it and do not delete it.
+
+`GET /api/search?q=&status=&senderId=&from=&to=&page=&limit=` is always scoped to
+the current user. If Elasticsearch is down or `SEARCH_ENABLED=false`, the same
+endpoint falls back to Postgres `ILIKE` on subject and recipient and returns
+`meta.degraded: true`. Sends keep working.
+
+`POST /api/admin/reindex` streams Postgres → `_bulk` (admin only). The
+`search-index` worker lives in the existing worker process and starts **only**
+when search is configured, so Redis Cloud does not pay for a no-op connection.
+The SearchBar UI is Phase 5.
+
+---
+
 ## Testing
 
 ```bash
@@ -504,6 +529,10 @@ Highest-value tests, by phase:
   2 with 5 recipients sends 2 and defers 3 as `rate_limited`; flushing a Redis
   job and running the reconciler restores it once. Optional live demo:
   `npx tsx tests/live/rateLimitFive.ts` (do not send 250 Ethereal in CI).
+- **Phase 3 (done)** — `/api/search` returns scheduled and sent rows by subject
+  and recipient; ES down or disabled degrades to Postgres `ILIKE` with
+  `degraded: true`; `POST /api/admin/reindex` upserts by `_id` and does not
+  duplicate hits.
 
 ---
 
@@ -514,7 +543,7 @@ Highest-value tests, by phase:
 | **0** | Repo, config, logging, errors, DB schema, clients, health, app shell, CI-ready build | **Complete** |
 | **1** | Scheduling core: campaigns API, CSV parsing, expander, `email-send` worker, Ethereal senders | **Complete** |
 | **2** | Rate limiting (Lua), pacing, concurrency, next-window reschedule, reconciler, BullMQ dashboard | **Complete** |
-| 3 | Elasticsearch indexing and search, Postgres fallback, reindex endpoint | Planned |
+| **3** | Elasticsearch indexing and search, Postgres fallback, reindex endpoint | **Complete** |
 | 4 | Google OAuth, sessions, Slack OAuth, live rate-limit notifications | Planned |
 | 5 | Dashboard UI: Scheduled/Sent tables, Compose modal with CSV upload, search | Planned |
 | 6 | README completion, load test, demo video | Planned |
@@ -536,7 +565,7 @@ Highest-value tests, by phase:
 - Graceful shutdown shared by both entrypoints.
 - React shell with reusable UI primitives and a live infrastructure panel reading
   real health from all three services.
-- 35 passing unit tests; live integration coverage for idempotency, CSV
+- 38 passing unit tests; live integration coverage for idempotency, CSV
   dedupe, and single-send; clean strict typecheck for both packages.
 
 ### Delivered in Phase 1
@@ -560,6 +589,17 @@ Highest-value tests, by phase:
 - One-shot reconciler at worker boot and `POST /api/admin/reconcile`.
 - `/admin/queues` (bull-board) behind HTTP Basic or admin identity.
 - Header “Queues” link; deferred emails show `rescheduleCount` in the table.
+
+### Delivered in Phase 3
+
+- `emails_v1` mapping + `emails` alias (`ensureIndices` at API and worker boot).
+- Dedicated `search-index` BullMQ queue on the shared Redis client; one Worker
+  inside the existing worker process, skipped when search is off.
+- Bulk index after expand; single index on sent, failed, and rate_limited.
+- `GET /api/search` with user-scoped ES query and Postgres `ILIKE` fallback.
+- `POST /api/admin/reindex` streams Postgres → `_bulk`.
+- SearchBar UI is still Phase 5; API types (`SearchHit`, `SearchMeta`) are in
+  the frontend contract so that phase does not invent the shape.
 
 ---
 

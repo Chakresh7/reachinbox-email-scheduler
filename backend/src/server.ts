@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { app } from "./app";
+import { ensureIndices } from "./bootstrap/ensureIndices";
 import { installShutdownHandlers, onShutdown } from "./bootstrap/shutdown";
 import { env } from "./config/env";
 import { disconnectElasticsearch, getElasticsearchInfo, isSearchConfigured } from "./lib/elasticsearch";
@@ -32,6 +33,7 @@ async function verifyDependencies(): Promise<void> {
     try {
       const info = await getElasticsearchInfo();
       log.info(info, "elasticsearch ready");
+      await ensureIndices();
     } catch (err) {
       // Non-fatal on purpose. Search degrades to Postgres (DESIGN.md §12); the
       // API must stay available.

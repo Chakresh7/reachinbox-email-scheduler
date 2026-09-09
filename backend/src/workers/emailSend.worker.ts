@@ -8,6 +8,7 @@ import { createWorkerConnection } from "../lib/redis";
 import { classifySmtpError, sendEmail } from "../mailer/sendEmail";
 import { effectiveDelayMs, effectiveHourlyLimit } from "../modules/campaigns/schedule.service";
 import type { EmailSendJobData } from "../queues/types";
+import { enqueueSearchIndex } from "../queues/searchIndex.queue";
 import { releaseSlot, reserveSlot } from "../ratelimit";
 import { claimEmailJob } from "./shared/claimEmailJob";
 import {
@@ -140,6 +141,9 @@ export async function processEmailSendJob(
       },
     });
     await refreshCampaignStatus(row.campaignId);
+    void enqueueSearchIndex(row.id).catch((err: unknown) => {
+      log.error({ err, emailJobId: row.id }, "search-index enqueue after send failed");
+    });
     return { emailJobId };
   } catch (err) {
     if (err instanceof DelayedError) throw err;
@@ -154,6 +158,9 @@ export async function processEmailSendJob(
         data: { status: "failed", lastError: message, sentAt: new Date() },
       });
       await refreshCampaignStatus(row.campaignId);
+      void enqueueSearchIndex(row.id).catch((err: unknown) => {
+        log.error({ err, emailJobId: row.id }, "search-index enqueue after failed send failed");
+      });
       throw new UnrecoverableError(message);
     }
 

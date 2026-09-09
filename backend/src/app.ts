@@ -9,6 +9,7 @@ import { requestId, requestLogger } from "./middleware/requestId";
 import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
 import { emailsRouter } from "./modules/emails/emails.routes";
 import { healthRouter } from "./modules/health/health.routes";
+import { searchRouter } from "./modules/search/search.routes";
 import { sendersRouter } from "./modules/senders/senders.routes";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { createQueueBoardRouter, protectQueueBoard } from "./queues/board";
@@ -77,6 +78,7 @@ export function createApp(): Express {
   app.use("/api/campaigns", campaignsRouter);
   app.use("/api/emails", emailsRouter);
   app.use("/api/senders", sendersRouter);
+  app.use("/api/search", searchRouter);
   app.use("/api/admin", adminRouter);
   app.use("/admin/queues", (req, res, next) => {
     void protectQueueBoard(req, res, next);

@@ -1,5 +1,6 @@
 import { Client } from "@elastic/elasticsearch";
 import { env } from "../config/env";
+import type { EmailSearchDocument } from "../modules/search/document";
 import { childLogger } from "./logger";
 
 /**
@@ -73,4 +74,30 @@ export async function disconnectElasticsearch(): Promise<void> {
   if (!esClient) return;
   await esClient.close();
   log.info("elasticsearch client closed");
+}
+
+export function emailsIndexName(): string {
+  return env.ELASTICSEARCH_INDEX;
+}
+
+/**
+ * Idempotent upsert. `_id` is the email_jobs UUID so a retried BullMQ job
+ * overwrites rather than duplicating.
+ */
+export async function indexDocuments(docs: EmailSearchDocument[]): Promise<number> {
+  if (!esClient) throw new Error("Elasticsearch is not configured");
+  if (docs.length === 0) return 0;
+
+  const index = emailsIndexName();
+  const operations = docs.flatMap((doc) => [{ index: { _index: index, _id: doc.id } }, doc]);
+  const result = await esClient.bulk({ operations, refresh: false });
+  if (result.errors) {
+    const failed = (result.items ?? [])
+      .map((item) => item.index)
+      .filter((entry) => entry?.error)
+      .slice(0, 5)
+      .map((entry) => ({ id: entry?._id, error: entry?.error?.reason }));
+    throw new Error(`Elasticsearch bulk had item errors: ${JSON.stringify(failed)}`);
+  }
+  return docs.length;
 }
