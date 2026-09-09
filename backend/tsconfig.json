@@ -12,7 +12,8 @@
     "module": "node16",
     "moduleResolution": "node16",
     "outDir": "dist",
-    "rootDir": "src",
+    /* `rootDir` is set only in tsconfig.build.json. Declaring it here would
+       conflict with typechecking tests/, which lives outside src/. */
     "sourceMap": true,
     "declaration": false,
 
@@ -39,6 +40,6 @@
        without an extra rewrite step, so relative imports are used throughout. */
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

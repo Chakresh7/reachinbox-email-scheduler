@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    /* Emitted layout: src/server.ts -> dist/server.js */
+    "rootDir": "src",
     "sourceMap": true
   },
   "include": ["src/**/*.ts"],

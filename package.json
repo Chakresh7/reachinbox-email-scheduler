@@ -1,0 +1,33 @@
+{
+  "name": "reachinbox-email-scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production-grade email job scheduler: BullMQ delayed jobs, Redis-backed rate limiting, Elasticsearch search",
+  "license": "UNLICENSED",
+  "comments": {
+    "workspaces": "Intentionally NOT an npm workspace. backend/ and frontend/ install independently so each Dockerfile stays a plain `COPY package*.json && npm ci`. These scripts are dev convenience only."
+  },
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix frontend install && npm --prefix backend run prisma:generate",
+    "dev": "concurrently -n api,worker,web -c cyan,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:api": "npm --prefix backend run dev",
+    "dev:worker": "npm --prefix backend run dev:worker",
+    "dev:web": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "test": "npm --prefix backend run test",
+    "check:deps": "npm --prefix backend run check:deps",
+    "prisma:migrate": "npm --prefix backend run prisma:migrate",
+    "prisma:studio": "npm --prefix backend run prisma:studio",
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:up:search": "docker compose --profile search up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.5"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}

@@ -1,0 +1,154 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reviewer-facing stack.
+#
+#   docker compose up -d postgres redis        # datastores only
+#   docker compose --profile search up -d      # add Elasticsearch (~1GB RAM)
+#   docker compose --profile app up -d         # everything, including api/worker/web
+#
+# Elasticsearch sits behind a profile because it is a JVM that wants around a
+# gigabyte, and the application degrades to Postgres search without it
+# (SEARCH_ENABLED=false). Nothing on the sending path depends on it.
+#
+# `api` and `worker` are the same image with different commands, so scaling
+# workers (`--scale worker=3`) demonstrates that the rate limiter is safe across
+# instances rather than relying on in-process state.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: reachinbox-scheduler
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: reachinbox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-reachinbox}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Dependent services wait for this, so they never start against a
+      # database that is still initialising.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-reachinbox}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: reachinbox-redis
+    restart: unless-stopped
+    # Two settings that carry the whole persistence guarantee:
+    #   appendonly yes        -> delayed jobs survive a restart (at most 1s loss)
+    #   maxmemory-policy      -> noeviction, so Redis may never discard a
+    #                            delayed-set entry and silently lose an email
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.0
+    container_name: reachinbox-elasticsearch
+    profiles: ["search", "app-search"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      # Development only. Never disable security on a reachable deployment.
+      xpack.security.enabled: "false"
+      xpack.license.self_generated.type: basic
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "true"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: reachinbox-api
+    profiles: ["app"]
+    restart: unless-stopped
+    env_file: [./backend/.env]
+    environment:
+      # Container-internal hostnames override whatever .env holds for a host run.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-reachinbox}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-reachinbox}
+      REDIS_URL: redis://redis:6379
+      PORT: 4000
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+    ports:
+      - "${API_PORT:-4000}:4000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    profiles: ["app"]
+    restart: unless-stopped
+    env_file: [./backend/.env]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-reachinbox}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-reachinbox}
+      REDIS_URL: redis://redis:6379
+    command: node dist/worker.js
+    # SIGTERM starts a graceful drain; in-flight sends must finish before exit,
+    # or an email is killed mid-SMTP with an unknown outcome.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_started }
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: reachinbox-web
+    profiles: ["app"]
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata:
+  redisdata:
+  esdata:

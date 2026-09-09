@@ -1,0 +1,20 @@
+# Normalise line endings: authored on Windows, reviewed on macOS/Linux.
+* text=auto eol=lf
+
+# Shell scripts and Docker entrypoints must keep LF or they fail in a container.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.lua text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# Keep generated lockfiles out of diff review noise
+package-lock.json linguist-generated=true
