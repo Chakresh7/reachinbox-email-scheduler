@@ -28,7 +28,7 @@ COPY backend/src ./src
 
 RUN npm run build
 # prisma CLI is a devDependency locally; migrate deploy at boot needs it.
-RUN npm prune --omit=dev && npm install prisma@7.10.0 --omit=dev --no-audit --no-fund --foreground-scripts
+RUN npm prune --omit=dev && npm install prisma@7.10.0 dotenv@17.2.3 --omit=dev --no-audit --no-fund --foreground-scripts
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM node:24-alpine AS runtime
