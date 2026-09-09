@@ -43,6 +43,12 @@ const dependencyLabels = {
   elasticsearch: "Elasticsearch",
 } as const;
 
+function formatDetail(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function DependencyRow({ name, report }: { name: string; report: DependencyReport }) {
   const config = stateConfig[report.status];
   const detailEntries = Object.entries(report.detail ?? {});
@@ -66,7 +72,7 @@ function DependencyRow({ name, report }: { name: string; report: DependencyRepor
             {detailEntries.map(([key, value]) => (
               <div key={key} className="flex gap-1 text-xs text-ink-muted">
                 <dt>{key}:</dt>
-                <dd className="font-mono">{String(value)}</dd>
+                <dd className="font-mono">{formatDetail(value)}</dd>
               </div>
             ))}
           </dl>

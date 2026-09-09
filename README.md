@@ -7,10 +7,12 @@ Redis-backed per-sender and global hourly rate limits, survives restarts without
 losing or duplicating a single email, and makes everything searchable through
 Elasticsearch.
 
-> **Status: Phase 5 of 6 complete.** Campaigns schedule, send through Ethereal,
+> **Status: Phase 6 of 6 complete.** Campaigns schedule, send through Ethereal,
 > respect Redis Lua rate limits, and are searchable via Elasticsearch (with a
 > Postgres fallback). Google OAuth, Slack incoming-webhooks, live rate-limit
-> notifications, and a Compose modal with CSV upload are wired. See
+> notifications, and a Compose modal with CSV upload are wired. A 1000-recipient
+> load script records ingest/expand/pacing numbers without blasting Ethereal.
+> Record the demo from [DEMO.md](./DEMO.md). See
 > [Implementation status](#implementation-status).
 >
 > The complete pre-implementation architecture, including every design decision
@@ -33,7 +35,9 @@ Elasticsearch.
 - [How rate limiting and concurrency are implemented](#how-rate-limiting-and-concurrency-are-implemented)
 - [How search works](#how-search-works)
 - [Testing](#testing)
+- [Features mapped to the assignment](#features-mapped-to-the-assignment)
 - [Implementation status](#implementation-status)
+- [Submission](#submission)
 - [Assumptions, shortcuts and trade-offs](#assumptions-shortcuts-and-trade-offs)
 
 ---
@@ -334,6 +338,7 @@ npm --prefix backend run test                 # unit + health contract (no Neon)
 cd backend; $env:RUN_INTEGRATION="1"; npm run test:integration
 npx tsx tests/live/sendFive.ts                # 5 real Ethereal messages (API + worker up)
 npx tsx tests/live/rateLimitFive.ts           # 5 recipients; cap sender at 2/hour to see deferral
+npm --prefix backend run load:1000            # 1000 recipients, future startAt, then cancel
 ```
 
 The integration suite is opt-in (`RUN_INTEGRATION=1`) so a default `npm test`
@@ -574,6 +579,52 @@ Highest-value tests, by phase:
   OAuth creds return `FEATURE_NOT_CONFIGURED`; `DEV_USER_ID` remains a non-prod
   fallback so the existing integration suite still passes.
 
+### Load test (1000 recipients)
+
+Does **not** send 1000 Ethereal messages. It POSTs a 1000-row CSV with
+`startAt` ~24h ahead, waits for expand, asserts the first hour is paced at
+≥2s and capped at 200, then cancels the campaign.
+
+```bash
+npm run dev                         # API + worker + frontend
+npm --prefix backend run load:1000
+```
+
+Recorded against the live stack (2026-09-09):
+
+| Metric | Result |
+|---|---|
+| `POST /api/campaigns` (1000 rows) | **2282 ms**, HTTP 202 |
+| Expand to 1000 `email_jobs` | **14939 ms** |
+| First-hour consecutive `scheduled_at` gap | **2000 ms** (floor `MIN_DELAY_BETWEEN_EMAILS_MS`) |
+| Jobs in the first hour window | **200** (campaign `hourlyLimit`) |
+
+Overflow rows share the next hour *boundary* by design (`max(i × delay, floor(i / limit) × 1 hour)`); runtime Lua still paces them if they ever fire. Set `SKIP_CANCEL=1` to leave the campaign queued.
+
+---
+
+## Features mapped to the assignment
+
+| Assignment bullet | Where it lives |
+|---|---|
+| Accept send requests via API | `POST /api/campaigns` (multipart CSV) |
+| Persist in PostgreSQL | `campaigns` + `email_jobs` |
+| Schedule with BullMQ delayed jobs, **no cron** | `email-send` delayed jobs; reconciler is boot-only |
+| Multiple senders, Ethereal SMTP | `senders` table, pooled Nodemailer, preview URLs |
+| Searchable via Elasticsearch | `search-index` worker; Postgres `ILIKE` fallback |
+| Live BullMQ dashboard | `/admin/queues` |
+| Survive restart; future emails still send | Redis AOF + one-shot DB→Redis reconciler |
+| Idempotency / no duplicate sends | five layers (see persistence section) |
+| Configurable worker concurrency | `WORKER_CONCURRENCY` |
+| Minimum delay between sends | **2 seconds** (`MIN_DELAY_BETWEEN_EMAILS_MS=2000`) |
+| Hourly rate limit, Redis-backed, multi-worker | Lua `reserveSlot` on `rl:global` / `rl:sender` |
+| On limit hit: delay, do not drop | `moveToDelayed` + FIFO overflow rank |
+| Real Slack OAuth + live message on limit | incoming-webhook + `notifications` worker |
+| Defined behaviour at 1000+ emails | expander `addBulk` + pre-spread; `load:1000` |
+| Real Google OAuth, header name/email/avatar, logout | `/api/auth/google`, `AppHeader` |
+| Dashboard Scheduled / Sent, Compose, CSV count | Compose modal + tabbed tables |
+| Loading / empty / error UX | skeletons, empty copy, toasts |
+
 ---
 
 ## Implementation status
@@ -586,7 +637,7 @@ Highest-value tests, by phase:
 | **3** | Elasticsearch indexing and search, Postgres fallback, reindex endpoint | **Complete** |
 | **4** | Google OAuth, sessions, Slack OAuth, live rate-limit notifications | **Complete** |
 | **5** | Dashboard UI: Scheduled/Sent tables, Compose modal with CSV upload, search | **Complete** |
-| 6 | README completion, load test, demo video | Planned |
+| **6** | README completion, load test, demo shot list | **Complete** |
 
 ### Delivered in Phase 0
 
@@ -662,6 +713,21 @@ Highest-value tests, by phase:
 - Scheduled / Sent tabs with SearchBar (`GET /api/search`), pagination, loading
   skeletons, empty states, status badges, and Ethereal preview links.
 - Dashboard is the schedule path; the campaign API remains for scripts and tests.
+
+### Delivered in Phase 6
+
+- `npm --prefix backend run load:1000` schedules 1000 recipients (future `startAt`), asserts 2s first-hour pacing and a 200/hour cap, then cancels. Recorded: API **2282 ms**, expand **14939 ms**.
+- Assignment-mapped feature checklist and submission notes in this README.
+- [DEMO.md](./DEMO.md) timed shot list for a ≤5 minute recording (you record the video; do not commit the file).
+- Infrastructure panel stringifies object health details (Redis `lastReconcile`).
+
+---
+
+## Submission
+
+- **Private GitHub repo.** Grant access to **`Mitrajit`** and **`Yadav036`**.
+- **Demo video (max 5 minutes):** follow [DEMO.md](./DEMO.md). Do not commit the recording.
+- **Submission form:** [Assignment Submission](https://forms.clickup.com/9005062261/f/8cbwp3n-8876/6NNNJ92DV93PQTAYST).
 
 ---
 
