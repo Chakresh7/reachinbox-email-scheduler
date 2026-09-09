@@ -1,22 +1,34 @@
 import { Mail } from "lucide-react";
 import { cn } from "../../lib/cn";
-import type { AuthUser } from "../../types/api";
+import type { AuthUser, SlackStatus } from "../../types/api";
 import { Button } from "../ui/Button";
 
 export interface AppHeaderProps {
   user?: AuthUser | null;
   onLogout?: () => void;
+  slackConfigured?: boolean;
+  slack?: SlackStatus | null;
+  onSlackTest?: () => void;
+  onSlackDisconnect?: () => void;
+  slackTestPending?: boolean;
   className?: string;
 }
 
 /**
- * Top header.
- *
- * The user's name, email and avatar are a stated requirement, so the shape is
- * fixed now; Phase 4 supplies the real user from Google OAuth and Phase 4 also
- * adds the Connect Slack control here.
+ * Top header: identity from Google session, plus Connect Slack / Connected chip.
  */
-export function AppHeader({ user, onLogout, className }: AppHeaderProps) {
+export function AppHeader({
+  user,
+  onLogout,
+  slackConfigured = false,
+  slack,
+  onSlackTest,
+  onSlackDisconnect,
+  slackTestPending,
+  className,
+}: AppHeaderProps) {
+  const connected = Boolean(slack?.connected);
+
   return (
     <header
       className={cn(
@@ -44,6 +56,50 @@ export function AppHeader({ user, onLogout, className }: AppHeaderProps) {
           >
             Queues
           </a>
+
+          {user ? (
+            slackConfigured ? (
+              connected ? (
+                <div className="flex items-center gap-2">
+                  <span className="hidden rounded-full border border-line bg-surface-sunken px-2.5 py-1 text-xs font-medium text-ink sm:inline">
+                    Slack · {slack?.channelName ?? slack?.teamName ?? "Connected"}
+                  </span>
+                  {onSlackTest ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onSlackTest}
+                      loading={slackTestPending}
+                    >
+                      Test Slack
+                    </Button>
+                  ) : null}
+                  {onSlackDisconnect ? (
+                    <Button variant="ghost" size="sm" onClick={onSlackDisconnect}>
+                      Disconnect
+                    </Button>
+                  ) : null}
+                </div>
+              ) : (
+                <a
+                  href="/api/slack/install"
+                  className="inline-flex h-8 items-center rounded-lg border border-line bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-sunken"
+                >
+                  Connect Slack
+                </a>
+              )
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled
+                title="Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET in backend/.env"
+              >
+                Connect Slack
+              </Button>
+            )
+          ) : null}
+
           {user ? (
             <>
               <div className="hidden text-right leading-tight sm:block">

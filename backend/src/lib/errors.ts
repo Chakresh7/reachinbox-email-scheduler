@@ -103,6 +103,9 @@ export const noActiveSender = (message = "No active SMTP sender is configured fo
 export const invalidState = (message: string) =>
   new AppError(409, ErrorCode.INVALID_STATE_TRANSITION, message);
 
+export const oauthStateMismatch = (message = "OAuth state mismatch") =>
+  new AppError(400, ErrorCode.OAUTH_STATE_MISMATCH, message);
+
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 
 export function isAppError(err: unknown): err is AppError {

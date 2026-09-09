@@ -1,9 +1,9 @@
 import type { Job } from "bullmq";
 import { DelayedError } from "bullmq";
 import { env } from "../../config/env";
-import { decrypt } from "../../lib/crypto";
 import { childLogger } from "../../lib/logger";
 import { prisma } from "../../lib/prisma";
+import { enqueueRateLimitNotification } from "../../queues/notifications.queue";
 import { enqueueSearchIndex } from "../../queues/searchIndex.queue";
 import {
   hourEpoch,
@@ -46,63 +46,6 @@ async function recordRateLimitEvent(input: {
       jobsDeferred: { increment: 1 },
     },
   });
-}
-
-async function maybeNotifySlack(senderId: string, hourWindow: Date, jobsDeferred: number): Promise<void> {
-  const sender = await prisma.sender.findUnique({
-    where: { id: senderId },
-    select: { email: true, userId: true, displayName: true },
-  });
-  if (!sender) return;
-
-  const integration = await prisma.slackIntegration.findUnique({
-    where: { userId: sender.userId },
-  });
-  if (!integration || integration.revokedAt) {
-    log.info({ senderId }, "rate-limit hit; Slack not connected, skipping notify");
-    return;
-  }
-
-  let webhookUrl: string;
-  try {
-    webhookUrl = decrypt(integration.webhookUrlEncrypted);
-  } catch (err) {
-    log.error({ err, senderId }, "could not decrypt Slack webhook");
-    await prisma.rateLimitEvent.updateMany({
-      where: { senderId, hourWindow },
-      data: { notifyError: "decrypt_failed" },
-    });
-    return;
-  }
-
-  const hourLabel = hourWindow.toISOString().slice(0, 13);
-  const body = {
-    text:
-      `Hourly send limit reached for ${sender.displayName} <${sender.email}> ` +
-      `(window ${hourLabel}Z). ${jobsDeferred} email(s) deferred to the next hour.`,
-  };
-
-  try {
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new Error(`Slack webhook HTTP ${response.status}`);
-    }
-    await prisma.rateLimitEvent.updateMany({
-      where: { senderId, hourWindow },
-      data: { notifiedAt: new Date(), notifyError: null },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.warn({ err, senderId }, "Slack rate-limit notify failed");
-    await prisma.rateLimitEvent.updateMany({
-      where: { senderId, hourWindow },
-      data: { notifyError: message },
-    });
-  }
 }
 
 /**
@@ -158,7 +101,16 @@ export async function rescheduleToNextWindow(input: {
         where: { senderId_hourWindow: { senderId: input.senderId, hourWindow: exhaustedWindow } },
         select: { jobsDeferred: true },
       });
-      await maybeNotifySlack(input.senderId, exhaustedWindow, event?.jobsDeferred ?? 1);
+      await enqueueRateLimitNotification({
+        type: "RATE_LIMIT_HIT",
+        userId: input.userId,
+        senderId: input.senderId,
+        hourWindowIso: exhaustedWindow.toISOString(),
+        limitValue: input.senderLimit,
+        jobsDeferred: event?.jobsDeferred ?? 1,
+      }).catch((err: unknown) => {
+        log.error({ err, senderId: input.senderId }, "notifications enqueue after SETNX failed");
+      });
     }
   }
 

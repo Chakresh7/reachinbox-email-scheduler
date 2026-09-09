@@ -1,10 +1,10 @@
 import request from "supertest";
 import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../../src/app";
-import { campaignExpandQueue } from "../../src/queues/campaignExpand.queue";
-import { emailSendQueue } from "../../src/queues/emailSend.queue";
+import { env } from "../../src/config/env";
 import { disconnectPrisma } from "../../src/lib/prisma";
 import { disconnectRedis } from "../../src/lib/redis";
+import { closeProducerQueues } from "../../src/queues/close";
 
 /**
  * Contract tests driven through the exported Express app, with no listener
@@ -20,12 +20,7 @@ import { disconnectRedis } from "../../src/lib/redis";
  * so they are closed below or Vitest would hang on open handles.
  */
 afterAll(async () => {
-  await Promise.allSettled([
-    emailSendQueue.close(),
-    campaignExpandQueue.close(),
-    disconnectPrisma(),
-    disconnectRedis(),
-  ]);
+  await Promise.allSettled([closeProducerQueues(), disconnectPrisma(), disconnectRedis()]);
 });
 
 describe("GET /healthz", () => {
@@ -89,5 +84,31 @@ describe("error envelope", () => {
   it("applies security headers from helmet", async () => {
     const response = await request(app).get("/healthz").expect(200);
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
+  });
+});
+
+describe("auth feature gates", () => {
+  it("GET /api/auth/features reports whether Google and Slack are configured", async () => {
+    const response = await request(app).get("/api/auth/features").expect(200);
+    expect(response.body).toEqual({
+      data: {
+        google: env.features.google,
+        slack: env.features.slack,
+      },
+    });
+  });
+
+  it("GET /api/auth/google without credentials returns FEATURE_NOT_CONFIGURED", async () => {
+    if (env.features.google) return;
+    const response = await request(app).get("/api/auth/google").expect(503);
+    expect(response.body.error.code).toBe("FEATURE_NOT_CONFIGURED");
+  });
+
+  it("GET /api/auth/google/callback rejects a missing OAuth state cookie", async () => {
+    const response = await request(app)
+      .get("/api/auth/google/callback")
+      .query({ code: "fake", state: "not-the-cookie" })
+      .expect(400);
+    expect(response.body.error.code).toBe("OAUTH_STATE_MISMATCH");
   });
 });

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
+import { featureNotConfigured } from "../lib/errors";
 
 /**
  * Single source of truth for configuration.
@@ -184,6 +185,8 @@ export const env = Object.freeze({
   isTest: raw.NODE_ENV === "test",
   isProd: raw.NODE_ENV === "production",
   allowedOrigins,
+  /** First FRONTEND_URL origin — OAuth callbacks redirect here. */
+  frontendOrigin: allowedOrigins[0] ?? "http://localhost:5173",
   adminEmails,
   features,
 });
@@ -202,7 +205,7 @@ export function requireFeatureConfig(feature: FeatureName): void {
       search: "SEARCH_ENABLED=true and ELASTICSEARCH_URL",
       bullBoardBasicAuth: "BULL_BOARD_USER, BULL_BOARD_PASSWORD",
     };
-    throw new Error(
+    throw featureNotConfigured(
       `Feature "${feature}" is not configured. Set: ${requirements[feature]} in backend/.env`,
     );
   }

@@ -84,6 +84,11 @@ export interface AuthUser {
   isAdmin: boolean;
 }
 
+export interface AuthFeatures {
+  google: boolean;
+  slack: boolean;
+}
+
 /** Mirrors the EmailJobStatus enum in the Prisma schema. */
 export type EmailStatus =
   | "scheduled"
@@ -148,4 +153,20 @@ export interface SearchMeta extends PageMeta {
 export interface SearchResponse {
   data: SearchHit[];
   meta: SearchMeta;
+}
+
+export interface CsvPreview {
+  totalRows: number;
+  validEmails: number;
+  duplicates: number;
+  invalidRows: { row: number; value: string; reason: string }[];
+}
+
+export interface CreateCampaignResult {
+  campaignId: string;
+  totalRecipients: number;
+  validCount: number;
+  invalidRows: { row: number; value: string; reason: string }[];
+  duplicateCount: number;
+  estimatedCompletionAt: string;
 }

@@ -11,6 +11,7 @@ import { hourEpoch } from "../../src/ratelimit";
 import { setMailSenderForTests } from "../../src/mailer/types";
 import { campaignExpandQueue } from "../../src/queues/campaignExpand.queue";
 import { emailSendQueue } from "../../src/queues/emailSend.queue";
+import { notificationsQueue } from "../../src/queues/notifications.queue";
 import { searchIndexQueue } from "../../src/queues/searchIndex.queue";
 import { releaseSlot, reserveSlot } from "../../src/ratelimit";
 import { startCampaignExpandWorker } from "../../src/workers/campaignExpand.worker";
@@ -264,6 +265,7 @@ afterAll(async () => {
     emailSendQueue.close(),
     campaignExpandQueue.close(),
     searchIndexQueue.close(),
+    notificationsQueue.close(),
     disconnectPrisma(),
     disconnectRedis(),
   ]);

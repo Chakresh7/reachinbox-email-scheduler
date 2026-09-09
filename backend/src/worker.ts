@@ -10,6 +10,7 @@ import { assertRedisReady, disconnectRedis } from "./lib/redis";
 import { closeProducerQueues } from "./queues";
 import { startCampaignExpandWorker } from "./workers/campaignExpand.worker";
 import { startEmailSendWorker } from "./workers/emailSend.worker";
+import { startNotificationsWorker } from "./workers/notifications.worker";
 import { startSearchIndexWorker } from "./workers/searchIndex.worker";
 
 const log = childLogger("worker");
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
   const expandWorker = startCampaignExpandWorker();
   const sendWorker = startEmailSendWorker();
   const searchWorker = isSearchConfigured ? startSearchIndexWorker() : null;
+  const notifyWorker = startNotificationsWorker();
 
   log.info(
     {
@@ -43,6 +45,7 @@ async function main(): Promise<void> {
       minDelayMs: env.MIN_DELAY_BETWEEN_EMAILS_MS,
       expandBatchSize: env.EXPAND_BATCH_SIZE,
       searchIndex: Boolean(searchWorker),
+      notifications: true,
     },
     "workers registered",
   );
@@ -64,6 +67,11 @@ async function main(): Promise<void> {
       handler: () => searchWorker.close(),
     });
   }
+  onShutdown({
+    name: "notifications-worker",
+    timeoutMs: 20_000,
+    handler: () => notifyWorker.close(),
+  });
   onShutdown({ name: "smtp-pool", handler: closeAllTransporters });
   onShutdown({ name: "queues", handler: closeProducerQueues });
   onShutdown({ name: "prisma", handler: disconnectPrisma });

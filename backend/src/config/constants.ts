@@ -12,12 +12,14 @@ export const QueueName = {
   campaignExpand: "campaign-expand",
   emailSend: "email-send",
   searchIndex: "search-index",
+  notifications: "notifications",
 } as const;
 
 export const JobName = {
   expandBatch: "expand-batch",
   sendEmail: "send-email",
   indexEmail: "index-email",
+  notifyRateLimit: "notify-rate-limit",
 } as const;
 
 export function emailSendJobId(emailJobId: string): string {
@@ -38,6 +40,11 @@ export function searchIndexJobId(emailJobId: string): string {
 
 export function searchIndexBulkJobId(campaignId: string, batchIndex: number): string {
   return `bulk:${campaignId}:${batchIndex}`;
+}
+
+/** BullMQ 6 custom ids must have exactly three `:` segments. */
+export function notifyRateLimitJobId(senderId: string, hourEpoch: number): string {
+  return `notif:${senderId}:${hourEpoch}`;
 }
 
 export function idempotencyRedisKey(hash: string): string {

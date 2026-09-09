@@ -8,6 +8,7 @@ import { safeEqual } from "../lib/crypto";
 import { isAdminUser, requireIdentity, requireUser } from "../middleware/requireAuth";
 import { campaignExpandQueue } from "./campaignExpand.queue";
 import { emailSendQueue } from "./emailSend.queue";
+import { notificationsQueue } from "./notifications.queue";
 import { searchIndexQueue } from "./searchIndex.queue";
 
 function unauthorizedBasic(res: Response): void {
@@ -72,6 +73,7 @@ export function createQueueBoardRouter() {
       new BullMQAdapter(emailSendQueue),
       new BullMQAdapter(campaignExpandQueue),
       new BullMQAdapter(searchIndexQueue),
+      new BullMQAdapter(notificationsQueue),
     ],
     serverAdapter,
   });

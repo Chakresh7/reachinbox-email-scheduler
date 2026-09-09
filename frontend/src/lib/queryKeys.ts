@@ -10,6 +10,7 @@ export const queryKeys = {
 
   auth: {
     me: ["auth", "me"] as const,
+    features: ["auth", "features"] as const,
   },
 
   emails: {

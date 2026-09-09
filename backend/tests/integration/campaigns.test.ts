@@ -7,6 +7,7 @@ import { disconnectRedis } from "../../src/lib/redis";
 import { setMailSenderForTests } from "../../src/mailer/types";
 import { campaignExpandQueue } from "../../src/queues/campaignExpand.queue";
 import { emailSendQueue } from "../../src/queues/emailSend.queue";
+import { notificationsQueue } from "../../src/queues/notifications.queue";
 import { searchIndexQueue } from "../../src/queues/searchIndex.queue";
 import { startCampaignExpandWorker } from "../../src/workers/campaignExpand.worker";
 import { processEmailSendJob, startEmailSendWorker } from "../../src/workers/emailSend.worker";
@@ -44,6 +45,7 @@ describe.skipIf(!run)("campaign schedule pipeline", () => {
       emailSendQueue.close(),
       campaignExpandQueue.close(),
       searchIndexQueue.close(),
+      notificationsQueue.close(),
       disconnectPrisma(),
       disconnectRedis(),
     ]);

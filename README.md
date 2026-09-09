@@ -7,10 +7,11 @@ Redis-backed per-sender and global hourly rate limits, survives restarts without
 losing or duplicating a single email, and makes everything searchable through
 Elasticsearch.
 
-> **Status: Phase 3 of 6 complete.** Campaigns schedule, send through Ethereal,
+> **Status: Phase 5 of 6 complete.** Campaigns schedule, send through Ethereal,
 > respect Redis Lua rate limits, and are searchable via Elasticsearch (with a
-> Postgres fallback). Google OAuth, Slack, and the Compose UI remain later
-> phases. See [Implementation status](#implementation-status).
+> Postgres fallback). Google OAuth, Slack incoming-webhooks, live rate-limit
+> notifications, and a Compose modal with CSV upload are wired. See
+> [Implementation status](#implementation-status).
 >
 > The complete pre-implementation architecture, including every design decision
 > and its rejected alternatives, is in **[DESIGN.md](./DESIGN.md)**.
@@ -135,8 +136,10 @@ npm --prefix backend run seed:senders
 npm run dev
 ```
 
-Then open **http://localhost:5173**. The dashboard shows live health plus
-scheduled and sent tables (Compose is Phase 5; schedule via the API).
+Then open **http://localhost:5173**. Sign in with Google (or the non-prod
+`DEV_USER_ID` fallback). **Compose New Email** uploads a CSV, shows the detected
+address count, and schedules via `POST /api/campaigns`. Scheduled and Sent tabs
+poll every 5s; search uses `GET /api/search`.
 
 ```bash
 curl -F "subject=Hello" -F "body=Hi there" -F "startAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -220,8 +223,9 @@ npm --prefix backend run seed:senders
 
 The script prints `DEV_USER_ID=<uuid>` and writes it into `backend/.env` when
 that key is missing or empty. Restart the API and worker afterwards so they
-reload the identity. Until Google OAuth (Phase 4), development APIs authenticate
-as that user. Production ignores `DEV_USER_ID` and returns 401.
+reload the identity. `DEV_USER_ID` is a **non-prod fallback**, not the demo
+login: production never impersonates, and a missing session cookie is a 401.
+Google login sets an httpOnly `sid` JWT cookie; `POST /api/auth/logout` clears it.
 
 If Ethereal rate-limits account creation, pre-create accounts at
 <https://ethereal.email/create> and paste them into `ETHEREAL_ACCOUNTS` as JSON.
@@ -233,33 +237,63 @@ delivery is verifiable in one click.
 
 ## Google and Slack OAuth setup
 
-*Wired in Phase 4. Credentials are configured now so nothing is blocked later.*
+Paste credentials into `backend/.env` and **restart the API**. Empty client IDs
+are valid at boot: `GET /api/auth/google` and `GET /api/slack/install` return
+`FEATURE_NOT_CONFIGURED` (503) until the values exist. There is no dummy login
+and no fake webhook.
 
-**Google** — [console.cloud.google.com](https://console.cloud.google.com) →
-APIs & Services → Credentials → Create OAuth client ID → Web application.
-Authorised redirect URI:
+### Google Cloud Console
 
-```
-http://localhost:4000/api/auth/google/callback
-```
+1. [console.cloud.google.com](https://console.cloud.google.com) → APIs & Services
+   → Credentials → Create OAuth client ID → **Web application**.
+2. Authorised redirect URI (must match `GOOGLE_REDIRECT_URI` exactly):
 
-Add your account under OAuth consent screen → Test users while the app is in
-Testing mode. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`GOOGLE_REDIRECT_URI`.
+   ```
+   http://localhost:4000/api/auth/google/callback
+   ```
 
-**Slack** — [api.slack.com/apps](https://api.slack.com/apps) → Create New App →
-OAuth & Permissions. Add the redirect URL:
+3. OAuth consent screen in **Testing** mode; add your Google account under
+   **Test users**.
+4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and
+   `GOOGLE_REDIRECT_URI=http://localhost:4000/api/auth/google/callback`.
 
-```
-http://localhost:4000/api/slack/callback
-```
+Login is a real navigation to `/api/auth/google` (auth-code + PKCE), not an
+id_token in JavaScript. The API upserts `users` by `google_sub`, sets an
+httpOnly `sid` JWT (`SameSite=Lax`), and redirects to `{FRONTEND_URL}/dashboard`.
 
-Add the **`incoming-webhook`** scope. Set `SLACK_CLIENT_ID`,
-`SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI`.
+**Cookies through the Vite proxy.** The session cookie is issued by the API on
+`:4000`. The SPA on `:5173` proxies `/api` to that origin so the browser treats
+the cookie as same-site. `credentials: "include"` is set on every `fetch`. Do
+not point the frontend at `localhost:4000` directly in development — that would
+make the cookie cross-site.
 
-`incoming-webhook` is used rather than `chat:write` because the user picks the
-target channel during install and the result is a single POST-able URL — fewer
-moving parts and fewer live-demo failure modes.
+### Slack app
+
+1. [api.slack.com/apps](https://api.slack.com/apps) → Create New App →
+   **OAuth & Permissions**.
+2. Redirect URL (must match `SLACK_REDIRECT_URI` exactly):
+
+   ```
+   http://localhost:4000/api/slack/callback
+   ```
+
+3. Bot token scopes: **`incoming-webhook` only** (not `chat:write`).
+4. Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
+   `SLACK_REDIRECT_URI=http://localhost:4000/api/slack/callback`.
+
+Dashboard **Connect Slack** is `GET /api/slack/install`. After the user picks a
+channel, the incoming-webhook URL is stored AES-256-GCM encrypted. Disconnect
+sets `revoked_at`. `POST /api/slack/test` posts one live Block Kit message so
+the demo does not have to wait for an hourly limit hit.
+
+### Notifications worker
+
+On `SENDER_HOURLY_LIMIT`, after the SETNX win, `email-send` **enqueues**
+`notifications` (`notif:{senderId}:{hourEpoch}` — three `:` segments for
+BullMQ 6). It does not `fetch` Slack inline. The notifications worker POSTs
+Block Kit; no row or a revoked integration completes as `{ skipped:
+"not_connected" }` and does not crash. `DEV_USER_ID` is not the demo login —
+use Google for the recorded walkthrough.
 
 ---
 
@@ -340,7 +374,8 @@ Implemented in Phase 1. Full detail in [DESIGN.md §6–§7](./DESIGN.md).
 Job payloads carry **only the `emailJobId`**. Subject, body and recipient are
 read from Postgres so a thousand 5KB bodies do not duplicate in Redis.
 
-`DEV_USER_ID` is a development identity only. Google session cookies arrive in Phase 4.
+`DEV_USER_ID` is a development identity only. Google session cookies are the
+real login; production never impersonates.
 
 ---
 
@@ -467,11 +502,11 @@ keeps its relative order and arrives already paced into the next window.
 
 ### Slack notification on a limit hit
 
-Phase 2 already records `rate_limit_events` (unique on `sender_id + hour_window`)
-and wins `SET notif:rl:{senderId}:{hourEpoch} NX EX 7200`, so a later webhook
-cannot spam. If a `slack_integrations` row already exists, the worker POSTs the
-incoming webhook **once per sender per hour**. Slack OAuth / Connect Slack is
-**Phase 4** — without a row, the skip is silent and nothing crashes.
+Phase 2 records `rate_limit_events` (unique on `sender_id + hour_window`) and
+wins `SET notif:rl:{senderId}:{hourEpoch} NX EX 7200`. Phase 4 enqueues the
+`notifications` queue on that SETNX win; the dedicated worker POSTs a Block Kit
+incoming-webhook. No integration, or `revoked_at` set, skips without failing
+the email. `POST /api/slack/test` posts one live message on demand.
 
 ### Behaviour with 1000+ emails at once
 
@@ -504,7 +539,8 @@ endpoint falls back to Postgres `ILIKE` on subject and recipient and returns
 `POST /api/admin/reindex` streams Postgres → `_bulk` (admin only). The
 `search-index` worker lives in the existing worker process and starts **only**
 when search is configured, so Redis Cloud does not pay for a no-op connection.
-The SearchBar UI is Phase 5.
+The dashboard SearchBar calls this endpoint with a debounce; an empty query uses
+the scheduled/sent list APIs instead.
 
 ---
 
@@ -533,6 +569,10 @@ Highest-value tests, by phase:
   and recipient; ES down or disabled degrades to Postgres `ILIKE` with
   `degraded: true`; `POST /api/admin/reindex` upserts by `_id` and does not
   duplicate hits.
+- **Phase 4 (done)** — Google auth-code + PKCE, httpOnly `sid` JWT, Slack
+  `incoming-webhook` OAuth, notifications worker + `/api/slack/test`. Empty
+  OAuth creds return `FEATURE_NOT_CONFIGURED`; `DEV_USER_ID` remains a non-prod
+  fallback so the existing integration suite still passes.
 
 ---
 
@@ -544,8 +584,8 @@ Highest-value tests, by phase:
 | **1** | Scheduling core: campaigns API, CSV parsing, expander, `email-send` worker, Ethereal senders | **Complete** |
 | **2** | Rate limiting (Lua), pacing, concurrency, next-window reschedule, reconciler, BullMQ dashboard | **Complete** |
 | **3** | Elasticsearch indexing and search, Postgres fallback, reindex endpoint | **Complete** |
-| 4 | Google OAuth, sessions, Slack OAuth, live rate-limit notifications | Planned |
-| 5 | Dashboard UI: Scheduled/Sent tables, Compose modal with CSV upload, search | Planned |
+| **4** | Google OAuth, sessions, Slack OAuth, live rate-limit notifications | **Complete** |
+| **5** | Dashboard UI: Scheduled/Sent tables, Compose modal with CSV upload, search | **Complete** |
 | 6 | README completion, load test, demo video | Planned |
 
 ### Delivered in Phase 0
@@ -598,8 +638,30 @@ Highest-value tests, by phase:
 - Bulk index after expand; single index on sent, failed, and rate_limited.
 - `GET /api/search` with user-scoped ES query and Postgres `ILIKE` fallback.
 - `POST /api/admin/reindex` streams Postgres → `_bulk`.
-- SearchBar UI is still Phase 5; API types (`SearchHit`, `SearchMeta`) are in
-  the frontend contract so that phase does not invent the shape.
+
+### Delivered in Phase 4
+
+- Server-side Google OAuth (auth-code + PKCE). `GET /api/auth/google` → consent
+  → upsert `users` by `google_sub` → `Set-Cookie: sid` (httpOnly JWT with
+  `tokenVersion`) → `/dashboard`. First login provisions an Ethereal sender
+  without blocking the session if Ethereal is down.
+- `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/features`.
+  Production: no cookie is 401. Non-prod: `DEV_USER_ID` fallback for tests and
+  local use — it is not the recorded-demo login.
+- Slack install (`incoming-webhook`), encrypted webhook storage, status,
+  disconnect (`revoked_at`), and `POST /api/slack/test`.
+- `notifications` BullMQ queue + worker (Block Kit). `email-send` enqueues after
+  SETNX; it never waits on Slack.
+- Login page Google link, ProtectedRoute, header identity + Connect Slack.
+
+### Delivered in Phase 5
+
+- Compose modal: subject, body, CSV/text dropzone, detected count from
+  `POST /api/campaigns/preview-csv`, start time, delay (seconds → ms), optional
+  hourly limit, `Idempotency-Key` on schedule.
+- Scheduled / Sent tabs with SearchBar (`GET /api/search`), pagination, loading
+  skeletons, empty states, status badges, and Ethereal preview links.
+- Dashboard is the schedule path; the campaign API remains for scripts and tests.
 
 ---
 

@@ -6,11 +6,13 @@ import { env } from "./config/env";
 import { forbidden } from "./lib/errors";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { requestId, requestLogger } from "./middleware/requestId";
+import { authRouter } from "./modules/auth/auth.routes";
 import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
 import { emailsRouter } from "./modules/emails/emails.routes";
 import { healthRouter } from "./modules/health/health.routes";
 import { searchRouter } from "./modules/search/search.routes";
 import { sendersRouter } from "./modules/senders/senders.routes";
+import { slackRouter } from "./modules/slack/slack.routes";
 import { adminRouter } from "./modules/admin/admin.routes";
 import { createQueueBoardRouter, protectQueueBoard } from "./queues/board";
 
@@ -75,6 +77,8 @@ export function createApp(): Express {
   // the load balancer do not depend on API versioning.
   app.use(healthRouter);
 
+  app.use("/api/auth", authRouter);
+  app.use("/api/slack", slackRouter);
   app.use("/api/campaigns", campaignsRouter);
   app.use("/api/emails", emailsRouter);
   app.use("/api/senders", sendersRouter);

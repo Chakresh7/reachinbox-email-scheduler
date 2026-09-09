@@ -1,16 +1,13 @@
 import { Mail } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Card, CardBody } from "../components/ui/Card";
+import { Spinner } from "../components/ui/Spinner";
+import { useAuthFeatures } from "../hooks/useAuth";
 
-/**
- * Login page.
- *
- * The Google button points at the backend's OAuth entry route, which is a real
- * server-side redirect. It is disabled until Phase 4 implements that route, so
- * nothing here pretends to work — a mock login would be worse than a disabled
- * one.
- */
 export function LoginPage() {
+  const features = useAuthFeatures();
+  const googleReady = features.data?.google === true;
+
   return (
     <div className="flex min-h-full items-center justify-center bg-surface-muted px-4 py-12">
       <Card className="w-full max-w-md">
@@ -22,18 +19,37 @@ export function LoginPage() {
             <div className="space-y-1">
               <h1 className="text-lg font-semibold text-ink">ReachInbox Email Scheduler</h1>
               <p className="text-sm text-ink-muted">
-                Sign in to schedule campaigns and monitor delivery.
+                Sign in with Google to schedule campaigns and monitor delivery.
               </p>
             </div>
           </div>
 
-          <Button fullWidth size="lg" disabled title="Google OAuth arrives in Phase 4">
-            Continue with Google
-          </Button>
+          {features.isPending ? (
+            <div className="flex justify-center py-2">
+              <Spinner label="Checking Google configuration" />
+            </div>
+          ) : googleReady ? (
+            <a
+              href="/api/auth/google"
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-brand text-base font-medium text-ink-inverse shadow-sm hover:bg-brand-hover"
+            >
+              Continue with Google
+            </a>
+          ) : (
+            <Button
+              fullWidth
+              size="lg"
+              disabled
+              title="Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env"
+            >
+              Continue with Google
+            </Button>
+          )}
 
           <p className="text-xs text-ink-subtle">
-            Google sign-in is wired in Phase 4. Until then the dashboard is reachable
-            directly at <code className="font-mono">/dashboard</code>.
+            {googleReady
+              ? "You will be redirected to Google, then back to the dashboard."
+              : "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env, then restart the API."}
           </p>
         </CardBody>
       </Card>

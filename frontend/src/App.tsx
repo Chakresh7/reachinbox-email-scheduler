@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { RouterProvider } from "react-router-dom";
 import { Toaster } from "sonner";
 import { ApiError, onUnauthorized } from "./lib/apiClient";
+import { queryKeys } from "./lib/queryKeys";
 import { router } from "./router";
 
 /**
@@ -32,11 +33,12 @@ const queryClient = new QueryClient({
 
 export function App() {
   useEffect(
-    // Session expiry is handled in one place. Phase 4 swaps this for a redirect
-    // to /login once there is a login to redirect to.
     () =>
       onUnauthorized(() => {
-        void queryClient.invalidateQueries({ queryKey: ["auth"] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
+        if (window.location.pathname !== "/login") {
+          void router.navigate("/login");
+        }
       }),
     [],
   );
