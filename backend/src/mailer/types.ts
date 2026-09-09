@@ -16,6 +16,27 @@ export interface SendResult {
 
 export type SmtpErrorKind = "permanent" | "transient";
 
+function smtpField(err: unknown, key: string): string {
+  if (typeof err !== "object" || err === null || !(key in err)) return "";
+  return String((err as Record<string, unknown>)[key] ?? "");
+}
+
+/** TCP/TLS handshake failures — the pooled transporter is usually dead after these. */
+export function isSmtpConnectionError(err: unknown): boolean {
+  const code = smtpField(err, "code").toUpperCase();
+  const command = smtpField(err, "command").toUpperCase();
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    code === "ECONNECTION" ||
+    code === "ETIMEDOUT" ||
+    code === "ESOCKET" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    command === "CONN" ||
+    /connection timeout|greeting never received/i.test(message)
+  );
+}
+
 export interface MailSender {
   send(message: OutboundEmail): Promise<SendResult>;
 }
@@ -39,23 +60,13 @@ export function getTestMailSender(): MailSender | null {
  */
 export function classifySmtpError(err: unknown): SmtpErrorKind {
   const message = err instanceof Error ? err.message : String(err);
-  const code =
-    typeof err === "object" && err !== null && "code" in err
-      ? String((err as { code?: unknown }).code)
-      : "";
+  const code = smtpField(err, "code").toUpperCase();
   const responseCode =
     typeof err === "object" && err !== null && "responseCode" in err
       ? Number((err as { responseCode?: unknown }).responseCode)
       : NaN;
 
-  if (
-    code === "ECONNECTION" ||
-    code === "ETIMEDOUT" ||
-    code === "ESOCKET" ||
-    code === "ECONNRESET" ||
-    code === "EPIPE" ||
-    code === "EENVELOPE"
-  ) {
+  if (isSmtpConnectionError(err) || code === "EENVELOPE") {
     return "transient";
   }
   if (Number.isFinite(responseCode) && responseCode >= 400 && responseCode < 500) {

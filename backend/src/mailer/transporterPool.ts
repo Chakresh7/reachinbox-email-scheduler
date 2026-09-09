@@ -10,6 +10,21 @@ type AnyTransporter = ReturnType<typeof nodemailer.createTransport>;
 
 const pool = new Map<string, AnyTransporter>();
 
+function isEtherealHost(host: string): boolean {
+  return host.toLowerCase().includes("ethereal.email");
+}
+
+export function evictTransporter(senderId: string): void {
+  const existing = pool.get(senderId);
+  if (!existing) return;
+  pool.delete(senderId);
+  try {
+    existing.close();
+  } catch (err) {
+    log.warn({ err, senderId }, "failed to close evicted transporter");
+  }
+}
+
 export async function getTransporter(senderId: string): Promise<AnyTransporter> {
   const existing = pool.get(senderId);
   if (existing) return existing;
@@ -20,14 +35,21 @@ export async function getTransporter(senderId: string): Promise<AnyTransporter> 
   }
 
   const password = decrypt(sender.smtpPassEncrypted);
+  const ethereal = isEtherealHost(sender.smtpHost);
+  // Ethereal is a shared test SMTP. Several parallel CONNs from a Render
+  // free instance time out; one pooled socket per sender is enough because
+  // the Lua limiter already serialises sends to 2s.
   const transporter = nodemailer.createTransport({
     pool: true,
     host: sender.smtpHost,
     port: sender.smtpPort,
     secure: sender.smtpPort === 465,
     auth: { user: sender.smtpUser, pass: password },
-    maxConnections: Math.min(env.WORKER_CONCURRENCY, 5),
-    maxMessages: 100,
+    maxConnections: ethereal ? 1 : Math.min(env.WORKER_CONCURRENCY, 5),
+    maxMessages: ethereal ? 250 : 100,
+    connectionTimeout: 60_000,
+    greetingTimeout: 30_000,
+    socketTimeout: 60_000,
   });
 
   pool.set(senderId, transporter);

@@ -11,5 +11,6 @@ describe("classifySmtpError", () => {
     expect(classifySmtpError({ code: "ETIMEDOUT" })).toBe("transient");
     expect(classifySmtpError({ code: "ECONNRESET" })).toBe("transient");
     expect(classifySmtpError({ responseCode: 421 })).toBe("transient");
+    expect(classifySmtpError({ command: "CONN", message: "Connection timeout" })).toBe("transient");
   });
 });
