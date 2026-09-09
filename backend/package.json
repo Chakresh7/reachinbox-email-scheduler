@@ -11,19 +11,20 @@
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/server.ts",
     "dev:worker": "tsx watch --clear-screen=false src/worker.ts",
-    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "build": "prisma generate && tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/ratelimit/scripts','dist/ratelimit/scripts',{recursive:true})\"",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.mts",
+    "seed:senders": "tsx prisma/seed.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:status": "prisma migrate status",
     "prisma:studio": "prisma studio",
-    "check:deps": "tsx src/scripts/checkDependencies.ts",
-    "check:schema": "tsx src/scripts/verifySchema.ts"
+    "check:deps": "tsx src/scripts/checkDependencies.ts"
   },
   "dependencies": {
     "@bull-board/api": "9.9.0",

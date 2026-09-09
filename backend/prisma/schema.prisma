@@ -125,6 +125,13 @@ model Campaign {
   totalRecipients Int            @default(0) @map("total_recipients")
   status          CampaignStatus @default(draft)
 
+  /// Validated, deduped recipients. The expander reads this in batches; it is
+  /// not stored only in Redis because a 50k-row campaign would not fit a job payload.
+  recipients Json @default("[]")
+  /// How many recipients have been written to email_jobs. Lets a retried
+  /// expander batch resume without re-inserting the prefix of the list.
+  expandedCount Int @default(0) @map("expanded_count")
+
   /// Supports safe client retries of POST /api/campaigns.
   idempotencyKey String? @unique @map("idempotency_key")
 

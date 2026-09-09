@@ -35,33 +35,43 @@ export function AppHeader({ user, onLogout, className }: AppHeaderProps) {
           </div>
         </div>
 
-        {user ? (
-          <div className="flex items-center gap-3">
-            <div className="hidden text-right leading-tight sm:block">
-              <p className="text-sm font-medium text-ink">{user.name}</p>
-              <p className="text-xs text-ink-muted">{user.email}</p>
-            </div>
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.name}
-                className="size-9 rounded-full border border-line object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <span className="flex size-9 items-center justify-center rounded-full bg-brand-subtle text-sm font-semibold text-brand">
-                {user.name.charAt(0).toUpperCase()}
-              </span>
-            )}
-            {onLogout ? (
-              <Button variant="secondary" size="sm" onClick={onLogout}>
-                Log out
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-xs text-ink-subtle">Not signed in</span>
-        )}
+        <div className="flex items-center gap-3">
+          <a
+            href="/admin/queues"
+            target="_blank"
+            rel="noreferrer"
+            className="hidden text-xs font-medium text-ink-muted hover:text-ink sm:inline"
+          >
+            Queues
+          </a>
+          {user ? (
+            <>
+              <div className="hidden text-right leading-tight sm:block">
+                <p className="text-sm font-medium text-ink">{user.name}</p>
+                <p className="text-xs text-ink-muted">{user.email}</p>
+              </div>
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.name}
+                  className="size-9 rounded-full border border-line object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span className="flex size-9 items-center justify-center rounded-full bg-brand-subtle text-sm font-semibold text-brand">
+                  {user.name.charAt(0).toUpperCase()}
+                </span>
+              )}
+              {onLogout ? (
+                <Button variant="secondary" size="sm" onClick={onLogout}>
+                  Log out
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-xs text-ink-subtle">Not signed in</span>
+          )}
+        </div>
       </div>
     </header>
   );

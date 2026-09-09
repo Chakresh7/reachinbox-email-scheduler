@@ -6,7 +6,12 @@ import { env } from "./config/env";
 import { forbidden } from "./lib/errors";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { requestId, requestLogger } from "./middleware/requestId";
+import { campaignsRouter } from "./modules/campaigns/campaigns.routes";
+import { emailsRouter } from "./modules/emails/emails.routes";
 import { healthRouter } from "./modules/health/health.routes";
+import { sendersRouter } from "./modules/senders/senders.routes";
+import { adminRouter } from "./modules/admin/admin.routes";
+import { createQueueBoardRouter, protectQueueBoard } from "./queues/board";
 
 /**
  * Express application assembly.
@@ -69,8 +74,13 @@ export function createApp(): Express {
   // the load balancer do not depend on API versioning.
   app.use(healthRouter);
 
-  // Phase 1+ mounts /api/campaigns, /api/emails, /api/auth, /api/slack,
-  // /api/search and /admin/queues here.
+  app.use("/api/campaigns", campaignsRouter);
+  app.use("/api/emails", emailsRouter);
+  app.use("/api/senders", sendersRouter);
+  app.use("/api/admin", adminRouter);
+  app.use("/admin/queues", (req, res, next) => {
+    void protectQueueBoard(req, res, next);
+  }, createQueueBoardRouter());
 
   app.use(notFoundHandler);
   app.use(errorHandler);

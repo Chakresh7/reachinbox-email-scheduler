@@ -75,6 +75,7 @@ const envSchema = z.object({
     "ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32",
   ),
   SESSION_TTL_DAYS: intFromEnv("SESSION_TTL_DAYS", { min: 1, max: 365 }).default(7),
+  DEV_USER_ID: z.string().trim().default(""),
 
   // ── Elasticsearch (feature) ───────────────────────────────────────────────
   SEARCH_ENABLED: boolFromEnv("SEARCH_ENABLED").default(true),

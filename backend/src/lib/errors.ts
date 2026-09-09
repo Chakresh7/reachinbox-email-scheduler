@@ -89,8 +89,19 @@ export const featureNotConfigured = (message: string) =>
 export const dependencyUnavailable = (message: string, cause?: unknown) =>
   new AppError(503, ErrorCode.DEPENDENCY_UNAVAILABLE, message, { cause });
 
-export const internal = (message = "Internal server error", cause?: unknown) =>
-  new AppError(500, ErrorCode.INTERNAL, message, { cause });
+export const csvNoValidRecipients = (details?: unknown) =>
+  new AppError(
+    400,
+    ErrorCode.CSV_NO_VALID_RECIPIENTS,
+    "No valid email addresses were found in the uploaded file",
+    { details },
+  );
+
+export const noActiveSender = (message = "No active SMTP sender is configured for this user") =>
+  new AppError(400, ErrorCode.NO_ACTIVE_SENDER, message);
+
+export const invalidState = (message: string) =>
+  new AppError(409, ErrorCode.INVALID_STATE_TRANSITION, message);
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 

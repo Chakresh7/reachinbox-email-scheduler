@@ -116,6 +116,18 @@ async function main(): Promise<void> {
     pass(`enum ${enumType.name} (${enumType.labels} values)`);
   }
 
+  const campaignCols = await prisma.$queryRaw<{ name: string }[]>`
+    SELECT column_name AS name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'campaigns'
+      AND column_name IN ('recipients', 'expanded_count')
+  `;
+  const campaignColNames = new Set(campaignCols.map((c) => c.name));
+  if (campaignColNames.has("recipients")) pass("column campaigns.recipients (expander source of truth)");
+  else fail("column campaigns.recipients is MISSING");
+  if (campaignColNames.has("expanded_count")) pass("column campaigns.expanded_count");
+  else fail("column campaigns.expanded_count is MISSING");
+
   // ── Indexes that carry a correctness guarantee ──
   const indexes = await prisma.$queryRaw<Row[]>`
     SELECT indexname AS name FROM pg_indexes WHERE schemaname = 'public'

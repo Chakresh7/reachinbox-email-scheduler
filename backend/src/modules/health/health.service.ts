@@ -3,6 +3,7 @@ import { isSearchConfigured, pingElasticsearch } from "../../lib/elasticsearch";
 import { errorMessage } from "../../lib/errors";
 import { pingPostgres } from "../../lib/prisma";
 import { getClientCount, getMaxmemoryPolicy, pingRedis } from "../../lib/redis";
+import { readLastReconcile } from "../../bootstrap/reconcile";
 
 /**
  * Dependency readiness.
@@ -68,9 +69,10 @@ async function checkPostgres(): Promise<DependencyReport> {
 async function checkRedis(): Promise<DependencyReport> {
   try {
     const latencyMs = await withTimeout(pingRedis(), PROBE_TIMEOUT_MS, "redis");
-    const [maxmemoryPolicy, clientCount] = await Promise.all([
+    const [maxmemoryPolicy, clientCount, lastReconcile] = await Promise.all([
       getMaxmemoryPolicy(),
       getClientCount(),
+      readLastReconcile(),
     ]);
 
     // Reachable but misconfigured is worth surfacing: it will not fail a send
@@ -84,6 +86,7 @@ async function checkRedis(): Promise<DependencyReport> {
       detail: {
         maxmemoryPolicy: maxmemoryPolicy ?? "unknown",
         clientCount: clientCount ?? "unknown",
+        ...(lastReconcile ? { lastReconcile } : {}),
       },
       ...(evictionUnsafe
         ? { error: `maxmemory-policy is "${maxmemoryPolicy}"; expected "noeviction"` }

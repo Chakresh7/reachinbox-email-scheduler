@@ -1,18 +1,15 @@
-import { CalendarClock, Inbox } from "lucide-react";
 import { SystemStatus } from "../components/domain/SystemStatus";
+import { EmailsTable } from "../components/domain/EmailsTable";
 import { AppHeader } from "../components/layout/AppHeader";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
-import { EmptyState } from "../components/ui/EmptyState";
+import { useScheduledEmails, useSentEmails } from "../hooks/useEmails";
+import { ApiError } from "../lib/apiClient";
 
-/**
- * Dashboard shell.
- *
- * Phase 0 renders the layout plus live infrastructure health. The Scheduled and
- * Sent tabs, the Compose modal and the search bar arrive in Phase 5, built on
- * the primitives in components/ui.
- */
 export function DashboardPage() {
+  const scheduled = useScheduledEmails();
+  const sent = useSentEmails();
+
   return (
     <div className="min-h-full bg-surface-muted">
       <AppHeader />
@@ -25,7 +22,7 @@ export function DashboardPage() {
               Schedule outbound email, then watch it move through the queue.
             </p>
           </div>
-          <Button disabled title="Available in Phase 5">
+          <Button disabled title="Compose modal arrives in Phase 5 — schedule via POST /api/campaigns">
             Compose New Email
           </Button>
         </div>
@@ -36,21 +33,40 @@ export function DashboardPage() {
           <Card>
             <CardHeader
               title="Scheduled Emails"
-              description="Queued and waiting to send"
+              description={
+                scheduled.data
+                  ? `${scheduled.data.meta.total} queued`
+                  : "Queued and waiting to send"
+              }
             />
-            <EmptyState
-              icon={<CalendarClock className="size-5" />}
-              title="No scheduled emails"
-              description="Once the scheduling API lands in Phase 1, campaigns you schedule will appear here."
+            <EmailsTable
+              rows={scheduled.data?.data}
+              isLoading={scheduled.isPending}
+              isError={scheduled.isError}
+              errorMessage={
+                scheduled.error instanceof ApiError ? scheduled.error.message : undefined
+              }
+              emptyTitle="No scheduled emails"
+              emptyDescription="POST a campaign to /api/campaigns and rows will appear here within a few seconds."
+              emptyIcon="scheduled"
+              timeKind="scheduled"
             />
           </Card>
 
           <Card>
-            <CardHeader title="Sent Emails" description="Delivered or failed" />
-            <EmptyState
-              icon={<Inbox className="size-5" />}
-              title="No sent emails"
-              description="Sent messages will show their Ethereal preview link here."
+            <CardHeader
+              title="Sent Emails"
+              description={sent.data ? `${sent.data.meta.total} delivered or failed` : "Delivered or failed"}
+            />
+            <EmailsTable
+              rows={sent.data?.data}
+              isLoading={sent.isPending}
+              isError={sent.isError}
+              errorMessage={sent.error instanceof ApiError ? sent.error.message : undefined}
+              emptyTitle="No sent emails"
+              emptyDescription="Sent messages will show their Ethereal preview link here."
+              emptyIcon="sent"
+              timeKind="sent"
             />
           </Card>
         </div>

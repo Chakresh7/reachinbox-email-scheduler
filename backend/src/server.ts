@@ -6,6 +6,7 @@ import { disconnectElasticsearch, getElasticsearchInfo, isSearchConfigured } fro
 import { childLogger } from "./lib/logger";
 import { disconnectPrisma, pingPostgres, postgresPoolMax } from "./lib/prisma";
 import { assertRedisReady, disconnectRedis } from "./lib/redis";
+import { closeProducerQueues } from "./queues";
 
 /**
  * API entrypoint.
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
         server.close((err) => (err ? reject(err) : resolve()));
       }),
   });
+  onShutdown({ name: "queues", handler: closeProducerQueues });
   onShutdown({ name: "prisma", handler: disconnectPrisma });
   onShutdown({ name: "elasticsearch", handler: disconnectElasticsearch });
   onShutdown({ name: "redis", handler: disconnectRedis });

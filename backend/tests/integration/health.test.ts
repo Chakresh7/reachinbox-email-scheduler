@@ -1,6 +1,8 @@
 import request from "supertest";
 import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../../src/app";
+import { campaignExpandQueue } from "../../src/queues/campaignExpand.queue";
+import { emailSendQueue } from "../../src/queues/emailSend.queue";
 import { disconnectPrisma } from "../../src/lib/prisma";
 import { disconnectRedis } from "../../src/lib/redis";
 
@@ -18,7 +20,12 @@ import { disconnectRedis } from "../../src/lib/redis";
  * so they are closed below or Vitest would hang on open handles.
  */
 afterAll(async () => {
-  await Promise.allSettled([disconnectPrisma(), disconnectRedis()]);
+  await Promise.allSettled([
+    emailSendQueue.close(),
+    campaignExpandQueue.close(),
+    disconnectPrisma(),
+    disconnectRedis(),
+  ]);
 });
 
 describe("GET /healthz", () => {

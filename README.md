@@ -7,10 +7,10 @@ Redis-backed per-sender and global hourly rate limits, survives restarts without
 losing or duplicating a single email, and makes everything searchable through
 Elasticsearch.
 
-> **Status: Phase 0 of 6 complete.** The foundation is in place — configuration,
-> logging, error handling, the full database schema, live dependency health, and
-> both service entrypoints with graceful shutdown. The scheduling core lands in
-> Phase 1. See [Implementation status](#implementation-status).
+> **Status: Phase 1 of 6 complete.** Campaigns can be scheduled from a CSV,
+> expanded with BullMQ delayed jobs, and sent through live Ethereal SMTP.
+> Redis hourly limiter, Google OAuth, Elasticsearch indexing and Compose UI
+> remain later phases. See [Implementation status](#implementation-status).
 >
 > The complete pre-implementation architecture, including every design decision
 > and its rejected alternatives, is in **[DESIGN.md](./DESIGN.md)**.
@@ -127,12 +127,24 @@ npm run prisma:migrate
 # 5. Verify every dependency before starting anything
 npm run check:deps
 
-# 6. Run the API, worker and frontend together
+# 6. Create a local user + 3 real Ethereal senders. Paste DEV_USER_ID into backend/.env.
+npm --prefix backend run seed:senders
+
+# 7. Run the API, worker and frontend together
 npm run dev
 ```
 
-Then open **http://localhost:5173**. The dashboard shows live health for
-Postgres, Redis and Elasticsearch, read from the real services.
+Then open **http://localhost:5173**. The dashboard shows live health plus
+scheduled and sent tables (Compose is Phase 5; schedule via the API).
+
+```bash
+curl -F "subject=Hello" -F "body=Hi there" -F "startAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -F "delayBetweenMs=2000" -F "file=@backend/tests/live/five.csv" \
+  -H "Idempotency-Key: demo-1" \
+  http://localhost:4000/api/campaigns
+```
+
+On Windows PowerShell, use `npx tsx tests/live/sendFive.ts` from `backend/` instead.
 
 Useful single checks:
 
@@ -202,9 +214,13 @@ passwords, rather than creating throwaway accounts in memory that would be lost
 on restart.
 
 ```bash
-# Phase 1: creates SEED_SENDER_COUNT Ethereal accounts and inserts sender rows
 npm --prefix backend run seed:senders
 ```
+
+The script prints `DEV_USER_ID=<uuid>` and writes it into `backend/.env` when
+that key is missing or empty. Restart the API and worker afterwards so they
+reload the identity. Until Google OAuth (Phase 4), development APIs authenticate
+as that user. Production ignores `DEV_USER_ID` and returns 401.
 
 If Ethereal rate-limits account creation, pre-create accounts at
 <https://ethereal.email/create> and paste them into `ETHEREAL_ACCOUNTS` as JSON.
@@ -274,42 +290,56 @@ docker compose --profile app up -d --build
 docker compose --profile app up -d --scale worker=3   # prove multi-instance limits
 ```
 
+### Tests
+
+```bash
+npm --prefix backend run test                 # unit + health contract (no Neon)
+# Live Neon + Redis; SMTP is stubbed. Requires DEV_USER_ID from seed:senders.
+# PowerShell:
+cd backend; $env:RUN_INTEGRATION="1"; npm run test:integration
+npx tsx tests/live/sendFive.ts                # 5 real Ethereal messages (API + worker up)
+npx tsx tests/live/rateLimitFive.ts           # 5 recipients; cap sender at 2/hour to see deferral
+```
+
+The integration suite is opt-in (`RUN_INTEGRATION=1`) so a default `npm test`
+cannot write to Neon. SMTP is a recording stub; `sendFive.ts` is the live
+Ethereal demo.
+
 ### BullMQ dashboard
 
-`http://localhost:4000/admin/queues` — live queue visibility (waiting, delayed,
-active, completed, failed, plus per-job data). Gated behind an admin session,
-with HTTP Basic as a fallback. *Mounted in Phase 2.*
+`http://localhost:4000/admin/queues` (also linked from the dashboard header, and
+proxied at `http://localhost:5173/admin/queues`). HTTP Basic when
+`BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` are set; otherwise the seeded admin
+identity. Unauthenticated requests get 401.
 
 ---
 
 ## How scheduling works
 
-*Implemented in Phase 1. Full detail in [DESIGN.md §6–§7](./DESIGN.md).*
+Implemented in Phase 1. Full detail in [DESIGN.md §6–§7](./DESIGN.md).
+**Pre-spread of `scheduled_at` and the Redis Lua limiter are both active.**
 
-1. `POST /api/campaigns` validates the request, parses the CSV, deduplicates and
-   validates recipients, writes one `campaigns` row, and enqueues a single
-   **`campaign-expand`** job. It responds `202` immediately, so the request never
-   waits on a thousand inserts.
-2. The expander creates `email_jobs` rows in batches of 500 (`createMany`) and
-   enqueues delayed jobs with `addBulk` — roughly four database statements and
-   four Redis round trips for 1000 recipients, not 2000.
-3. Each recipient's send time is computed at enqueue time:
+1. `POST /api/campaigns` validates the CSV, writes one `campaigns` row (including
+   the recipient JSON so a 50k list is not stuffed into Redis), and enqueues a
+   **`campaign-expand`** job. Response is `202` in O(1).
+2. The expander creates `email_jobs` in batches of 500 (`createMany` +
+   `skipDuplicates` on `dedupe_key`) and `addBulk` delayed jobs with
+   `jobId = email:<uuid>:send` (BullMQ 6 requires three colon-separated segments).
+3. Send time for recipient `i`:
 
    ```
-   scheduledAt = startAt + max(index × delay, floor(index / hourlyLimit) × 1 hour)
+   scheduledAt = startAt + max(i × delay, floor(i / hourlyLimit) × 1 hour)
+   delay is clamped to MIN_DELAY_BETWEEN_EMAILS_MS (default **2000 ms**)
    ```
+4. The `email-send` worker loads the row, **reserves a Redis rate-limit slot**,
+   **conditionally claims** it, sends via Ethereal, stores `messageId` and
+   `previewUrl`. Runtime Lua counters are the authority when another campaign
+   shares the sender; pre-spread just makes the common case cheap.
 
-   That second term **pre-spreads** recipients across hour windows, so with a
-   200/hour limit, emails 200–399 are scheduled directly into hour two rather
-   than all piling onto hour one and each being deferred individually. It turns
-   ~800 wasted worker pickups into zero.
-4. The `email-send` worker loads the row, reserves a rate-limit slot, claims the
-   row, sends through Ethereal, and records the message id and preview URL.
+Job payloads carry **only the `emailJobId`**. Subject, body and recipient are
+read from Postgres so a thousand 5KB bodies do not duplicate in Redis.
 
-Job payloads carry **only the `emailJobId`**; subject, body and recipient are
-read from Postgres. A thousand jobs each holding a 5KB HTML body would put ~5MB
-of duplicated data in Redis per campaign, and the payload could drift from the
-database.
+`DEV_USER_ID` is a development identity only. Google session cookies arrive in Phase 4.
 
 ---
 
@@ -348,7 +378,7 @@ than periodically, because "every five minutes" is a cron by another name.
 |---|---|---|
 | 1. API | `Idempotency-Key` header + unique `campaigns.idempotency_key` | double-clicked Schedule, retried timed-out POST |
 | 2. Row | unique `email_jobs.dedupe_key` = `sha256(campaignId:email)` | retried expander batch, duplicate CSV rows |
-| 3. Queue | deterministic `jobId = email:<uuid>` | BullMQ rejects a duplicate add outright |
+| 3. Queue | deterministic `jobId = email:<uuid>:send` | BullMQ treats an existing id as a duplicate |
 | 4. Claim | conditional `UPDATE … WHERE status IN ('scheduled','rate_limited','failed')` | two workers taking the same job |
 | 5. Terminal | early return when already `sent`/`cancelled` | redelivery after a successful send |
 
@@ -397,8 +427,18 @@ instances. In-memory counting is used nowhere.
 
 **Why not BullMQ's built-in `limiter`?** It is queue-wide, so it cannot express a
 per-sender limit, and `{ max: 200, duration: 3600000 }` starves the queue for the
-rest of the hour with no visibility into why. It is used only as a coarse global
-stampede guard.
+rest of the hour with no visibility into why. `email-send` still sets
+`limiter: { max: 50, duration: 1000 }` as a coarse stampede guard only. The real
+limits live in Lua.
+
+**Pre-spread vs runtime.** Campaign expand still writes a `scheduled_at` that
+already respects delay and hourly caps so a 1000-recipient list does not all
+wake in hour one. Lua is what stops **cross-campaign** oversend when another
+campaign shares the sender.
+
+**Reconciler.** `RECONCILE_ON_BOOT` runs the one-shot repair **before** workers
+start. `POST /api/admin/reconcile` (admin identity) is the same function. There
+is no cron and no `setInterval` sweeper.
 
 Fixed window over sliding log: the assignment's own suggestion is
 `hour_window + sender`, a burst at a window boundary is acceptable for an
@@ -426,13 +466,11 @@ keeps its relative order and arrives already paced into the next window.
 
 ### Slack notification on a limit hit
 
-The moment a sender's hourly limit is reached, a **real message** is posted to the
-user's Slack via their stored incoming webhook. Guarded by
-`SET notif:rl:{senderId}:{hourEpoch} NX`, so 800 deferred jobs produce **exactly
-one** message per sender per hour rather than 800. If Slack was never connected,
-nothing is sent and nothing crashes; connect it later and notifications start
-working with no redeploy, because the token is read from the database at send
-time.
+Phase 2 already records `rate_limit_events` (unique on `sender_id + hour_window`)
+and wins `SET notif:rl:{senderId}:{hourEpoch} NX EX 7200`, so a later webhook
+cannot spam. If a `slack_integrations` row already exists, the worker POSTs the
+incoming webhook **once per sender per hour**. Slack OAuth / Connect Slack is
+**Phase 4** — without a row, the skip is silent and nothing crashes.
 
 ### Behaviour with 1000+ emails at once
 
@@ -461,10 +499,11 @@ Highest-value tests, by phase:
 - **Phase 0 (done)** — AES-256-GCM round-trip, tamper detection, malformed input;
   `/healthz` contract, error envelope, correlation-id handling and reflection
   guard.
-- **Phase 2** — 500 concurrent `reserveSlot` calls against a limit of 200 must
-  yield exactly 200 grants. Duplicate-prevention: the same job run twice
-  concurrently must call the transporter exactly once. Restart: stop the worker
-  mid-run, start it, and all emails send exactly once.
+- **Phase 2 (done)** — 500 concurrent `reserveSlot` calls against a limit of 200
+  yield exactly 200 `ALLOW`; `PACE` does not increment counters; a sender cap of
+  2 with 5 recipients sends 2 and defers 3 as `rate_limited`; flushing a Redis
+  job and running the reconciler restores it once. Optional live demo:
+  `npx tsx tests/live/rateLimitFive.ts` (do not send 250 Ethereal in CI).
 
 ---
 
@@ -473,8 +512,8 @@ Highest-value tests, by phase:
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Repo, config, logging, errors, DB schema, clients, health, app shell, CI-ready build | **Complete** |
-| 1 | Scheduling core: campaigns API, CSV parsing, expander, `email-send` worker, Ethereal senders | Next |
-| 2 | Rate limiting (Lua), pacing, concurrency, next-window reschedule, reconciler, BullMQ dashboard | Planned |
+| **1** | Scheduling core: campaigns API, CSV parsing, expander, `email-send` worker, Ethereal senders | **Complete** |
+| **2** | Rate limiting (Lua), pacing, concurrency, next-window reschedule, reconciler, BullMQ dashboard | **Complete** |
 | 3 | Elasticsearch indexing and search, Postgres fallback, reindex endpoint | Planned |
 | 4 | Google OAuth, sessions, Slack OAuth, live rate-limit notifications | Planned |
 | 5 | Dashboard UI: Scheduled/Sent tables, Compose modal with CSV upload, search | Planned |
@@ -497,7 +536,30 @@ Highest-value tests, by phase:
 - Graceful shutdown shared by both entrypoints.
 - React shell with reusable UI primitives and a live infrastructure panel reading
   real health from all three services.
-- 17 passing tests; clean strict typecheck and production build for both packages.
+- 35 passing unit tests; live integration coverage for idempotency, CSV
+  dedupe, and single-send; clean strict typecheck for both packages.
+
+### Delivered in Phase 1
+
+- `POST /api/campaigns` (multipart CSV), preview-csv, list/get/cancel.
+- BullMQ `campaign-expand` and `email-send` with deterministic job ids.
+- Real Ethereal senders (encrypted SMTP passwords), pooled Nodemailer, preview URLs.
+- Conditional DB claim so a job cannot send twice.
+- Dashboard scheduled/sent tables poll the live API.
+- `DEV_USER_ID` development identity (production still 401 without a session).
+
+### Delivered in Phase 2
+
+- Atomic `reserveSlot` / `releaseSlot` Lua on the **shared** ioredis client
+  (`rl:global`, `rl:sender`, `pace:sender`). Never on a Worker BRPOP connection.
+- Next-window overflow via `moveToDelayed` + `DelayedError` (retry attempts are
+  not consumed). `rate_limited` rows, `reschedule_count`, `rate_limit_events`,
+  and `SETNX` notify dedupe.
+- `email-send` order: load → reserve → deny/pace reschedule → claim →
+  `releaseSlot` on lost claim or SMTP failure → optional pace sleep → send.
+- One-shot reconciler at worker boot and `POST /api/admin/reconcile`.
+- `/admin/queues` (bull-board) behind HTTP Basic or admin identity.
+- Header “Queues” link; deferred emails show `rescheduleCount` in the table.
 
 ---
 
