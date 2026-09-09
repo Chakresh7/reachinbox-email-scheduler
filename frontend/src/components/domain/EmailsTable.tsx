@@ -92,8 +92,13 @@ export function EmailsTable({
                       </a>
                     ) : null}
                     {row.lastError ? (
-                      <span className="max-w-[14rem] truncate text-xs text-status-failed" title={row.lastError}>
-                        {row.lastError}
+                      <span
+                        className={`max-w-[14rem] truncate text-xs ${
+                          row.status === "failed" ? "text-status-failed" : "text-ink-muted"
+                        }`}
+                        title={row.lastError}
+                      >
+                        {row.status === "failed" ? row.lastError : `Retrying: ${row.lastError}`}
                       </span>
                     ) : null}
                   </div>
