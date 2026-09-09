@@ -38,7 +38,12 @@ export function startEmailSendWorker(): Worker<EmailSendJobData> {
 
   worker.on("failed", (job, err) => {
     if (err instanceof DelayedError) return;
-    log.error({ err, jobId: job?.id, emailJobId: job?.data.emailJobId }, "email-send failed");
+    const payload = { err, jobId: job?.id, emailJobId: job?.data.emailJobId };
+    if (err instanceof UnrecoverableError) {
+      log.error(payload, "email-send failed");
+      return;
+    }
+    log.warn(payload, "email-send retrying");
   });
   worker.on("stalled", (jobId) => log.warn({ jobId }, "email-send stalled"));
   return worker;
