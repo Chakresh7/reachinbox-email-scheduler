@@ -10,6 +10,10 @@ a second codebase.
 | Hosted Link of the project you have built | The **public Render URL** of the web service (below) |
 | Hosted Assignment | **The same URL** as Hosted Link |
 
+**Live service:** [https://reachinbox-7vtq.onrender.com](https://reachinbox-7vtq.onrender.com)
+
+A 1000-recipient campaign uses **3 Ethereal senders** at **200/hour each** (plus a 2s gap). That is about **600 in hour one and 400 in hour two**, not 5 hours (5 hours is one sender at 200/hour). **Rate limited / Deferred** is the cap working. Ethereal `Connection timeout` on Render Free is a flaky SMTP socket, not the limiter.
+
 Do not paste `localhost`. Reviewers must open the site without cloning.
 
 This app is **API + worker + SPA**. The session cookie only works if the
