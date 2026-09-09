@@ -145,6 +145,8 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-5173}:80"
+    environment:
+      API_UPSTREAM: http://api:4000
     depends_on:
       api: { condition: service_started }
 

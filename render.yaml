@@ -1,0 +1,89 @@
+# Render Blueprint — public dashboard + API + worker.
+# The WEB service is the URL you paste on the ClickUp form.
+# Connect this repo in Render → New → Blueprint.
+# Create env group "reachinbox" with Neon/Redis/ES/OAuth secrets (never commit them).
+
+previewsEnabled: false
+
+envVarGroups:
+  - name: reachinbox
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: PORT
+        value: "4000"
+      - key: REDIS_PREFIX
+        value: reachinbox
+      - key: REDIS_ASSERT_NOEVICTION
+        value: "false"
+      - key: SEARCH_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ELASTICSEARCH_URL
+        sync: false
+      - key: ELASTICSEARCH_API_KEY
+        sync: false
+      - key: SESSION_JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: SLACK_CLIENT_ID
+        sync: false
+      - key: SLACK_CLIENT_SECRET
+        sync: false
+      - key: SLACK_REDIRECT_URI
+        sync: false
+      - key: SLACK_SCOPES
+        value: incoming-webhook
+      - key: ETHEREAL_HOST
+        value: smtp.ethereal.email
+      - key: ETHEREAL_PORT
+        value: "587"
+      - key: MIN_DELAY_BETWEEN_EMAILS_MS
+        value: "2000"
+
+services:
+  - type: web
+    name: reachinbox-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    envVars:
+      - fromGroup: reachinbox
+    dockerCommand: "sh -c 'npx prisma migrate deploy && node dist/server.js'"
+
+  - type: worker
+    name: reachinbox-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - fromGroup: reachinbox
+    dockerCommand: "node dist/worker.js"
+
+  - type: web
+    name: reachinbox-web
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: API_UPSTREAM
+        value: http://reachinbox-api:4000

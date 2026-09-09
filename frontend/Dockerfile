@@ -19,7 +19,11 @@ RUN npm run build
 FROM nginx:1.27-alpine AS runtime
 
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# Official nginx image runs envsubst on templates/*.template at start.
+# Compose uses the Docker DNS name `api`; Render sets this to the API service.
+ENV API_UPSTREAM=http://api:4000
 
 EXPOSE 80
 

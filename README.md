@@ -38,6 +38,7 @@ Elasticsearch.
 - [Features mapped to the assignment](#features-mapped-to-the-assignment)
 - [Implementation status](#implementation-status)
 - [Submission](#submission)
+- [Hosted assignment](./HOSTING.md)
 - [Assumptions, shortcuts and trade-offs](#assumptions-shortcuts-and-trade-offs)
 
 ---
@@ -726,6 +727,7 @@ Overflow rows share the next hour *boundary* by design (`max(i × delay, floor(i
 ## Submission
 
 - **Private GitHub repo.** Grant access to **`Mitrajit`** and **`Yadav036`**.
+- **Hosted dashboard:** [HOSTING.md](./HOSTING.md) (Render). Paste that URL in both “Hosted” form fields.
 - **Demo video (max 5 minutes):** follow [DEMO.md](./DEMO.md). Do not commit the recording.
 - **Submission form:** [Assignment Submission](https://forms.clickup.com/9005062261/f/8cbwp3n-8876/6NNNJ92DV93PQTAYST).
 
