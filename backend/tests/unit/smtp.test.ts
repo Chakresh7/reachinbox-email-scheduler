@@ -13,4 +13,11 @@ describe("classifySmtpError", () => {
     expect(classifySmtpError({ responseCode: 421 })).toBe("transient");
     expect(classifySmtpError({ command: "CONN", message: "Connection timeout" })).toBe("transient");
   });
+
+  it("treats nodemailer envelope rejections from a dead session as transient", () => {
+    expect(classifySmtpError({ code: "EENVELOPE", responseCode: 550 })).toBe("transient");
+    expect(classifySmtpError(new Error("Can't send mail - all recipients were rejected"))).toBe(
+      "transient",
+    );
+  });
 });

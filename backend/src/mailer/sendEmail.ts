@@ -4,7 +4,7 @@ import { evictTransporter, getTransporter } from "./transporterPool";
 import {
   classifySmtpError,
   getTestMailSender,
-  isSmtpConnectionError,
+  isSmtpStaleSessionError,
   type OutboundEmail,
   type SendResult,
 } from "./types";
@@ -30,8 +30,8 @@ export async function sendEmail(senderId: string, message: OutboundEmail): Promi
   try {
     info = await dispatch(senderId, message);
   } catch (err) {
-    if (!isSmtpConnectionError(err)) throw err;
-    log.warn({ err, senderId }, "smtp connection failed; rebuilding transporter");
+    if (!isSmtpStaleSessionError(err)) throw err;
+    log.warn({ err, senderId }, "smtp session failed; rebuilding transporter");
     evictTransporter(senderId);
     info = await dispatch(senderId, message);
   }
